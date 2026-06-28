@@ -13,6 +13,7 @@ build/
 # Entorno
 .env
 .env.*
+!.env.example
 
 # Node / Expo
 node_modules/
