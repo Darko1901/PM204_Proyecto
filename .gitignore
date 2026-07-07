@@ -1,3 +1,7 @@
+# Base de datos local (SQLite; no versionar)
+*.db
+api/cafeteria.db
+
 # Python
 __pycache__/
 *.pyc
