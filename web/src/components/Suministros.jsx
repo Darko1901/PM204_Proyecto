@@ -230,7 +230,13 @@ export const Suministros = () => {
                   <div className="form-group">
                     <label className="form-label">Stock actual</label>
                     <input className="form-control" type="number" min={0} value={form.stock_actual}
+                      disabled={modal !== 'crear'}
                       onChange={e => setForm(f => ({ ...f, stock_actual: e.target.value }))} />
+                    {modal !== 'crear' && (
+                      <small className="form-text" style={{ color: 'var(--text-muted)' }}>
+                        Para cambiar el stock usa el botón "Ajuste de Stock" (registra el movimiento de inventario).
+                      </small>
+                    )}
                   </div>
                   <div className="form-group">
                     <label className="form-label">Stock mínimo</label>

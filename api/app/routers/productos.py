@@ -44,7 +44,7 @@ def obtener_producto(
         select(Producto)
         .options(joinedload(Producto.recetas).joinedload(Receta.suministro))
         .where(Producto.id == producto_id)
-    ).scalar_one_or_none()
+    ).unique().scalar_one_or_none()
     
     if not producto:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
@@ -95,7 +95,7 @@ def crear_producto(
         select(Producto)
         .options(joinedload(Producto.recetas).joinedload(Receta.suministro))
         .where(Producto.id == nuevo.id)
-    ).scalar_one()
+    ).unique().scalar_one()
     
     for r in producto.recetas:
         r.suministro_nombre = r.suministro.nombre
@@ -113,7 +113,7 @@ def actualizar_producto(
         select(Producto)
         .options(joinedload(Producto.recetas))
         .where(Producto.id == producto_id)
-    ).scalar_one_or_none()
+    ).unique().scalar_one_or_none()
     
     if not producto:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
@@ -159,7 +159,7 @@ def actualizar_producto(
         select(Producto)
         .options(joinedload(Producto.recetas).joinedload(Receta.suministro))
         .where(Producto.id == producto_id)
-    ).scalar_one()
+    ).unique().scalar_one()
     
     for r in producto.recetas:
         r.suministro_nombre = r.suministro.nombre

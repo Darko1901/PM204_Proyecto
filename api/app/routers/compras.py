@@ -49,7 +49,7 @@ def obtener_compra(
             joinedload(Compra.detalles).joinedload(DetalleCompra.suministro)
         )
         .where(Compra.id == compra_id)
-    ).scalar_one_or_none()
+    ).unique().scalar_one_or_none()
     
     if not c:
         raise HTTPException(status_code=404, detail="Compra no encontrada")

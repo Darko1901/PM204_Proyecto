@@ -112,7 +112,7 @@ export const api = {
   },
 
   eliminarReceta: async (recetaId) => {
-    const response = await fetch(`${API_BASE_URL}/recetas/${recetaId}`, {
+    const response = await fetch(`${API_BASE_URL}/productos/recetas/${recetaId}`, {
       method: 'DELETE', headers: getHeaders(),
     });
     return handleResponse(response);

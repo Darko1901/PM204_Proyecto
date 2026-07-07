@@ -93,7 +93,7 @@ def obtener_cuenta(
             joinedload(Cuenta.detalles).joinedload(DetalleCuenta.producto)
         )
         .where(Cuenta.id == cuenta_id)
-    ).scalar_one_or_none()
+    ).unique().scalar_one_or_none()
     
     if not c:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cuenta no encontrada")
@@ -258,7 +258,7 @@ def pagar_cuenta(
         select(Cuenta)
         .options(joinedload(Cuenta.detalles).joinedload(DetalleCuenta.producto).joinedload(Producto.recetas).joinedload(Receta.suministro))
         .where(Cuenta.id == cuenta_id)
-    ).scalar_one_or_none()
+    ).unique().scalar_one_or_none()
     
     if not cuenta or cuenta.estado not in [EstadoCuenta.abierta, EstadoCuenta.por_cobrar]:
         raise HTTPException(status_code=400, detail="La cuenta no se puede cobrar (invalida o ya pagada)")

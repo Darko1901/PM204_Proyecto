@@ -141,23 +141,30 @@ def registrar_ajuste(
     if body.cantidad <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La cantidad debe ser mayor a cero")
         
-    # Calcular nuevo stock
+    # Calcular nuevo stock. Se castea a float porque stock_actual es Numeric (Decimal)
+    # y no se puede operar Decimal con float directamente.
+    cantidad = float(body.cantidad)
+    stock = float(sumi.stock_actual)
+
     if body.tipo == TipoMovimiento.entrada:
-        sumi.stock_actual += body.cantidad
+        sumi.stock_actual = stock + cantidad
+        cantidad_mov = cantidad
     elif body.tipo == TipoMovimiento.salida:
-        if sumi.stock_actual < body.cantidad:
+        if stock < cantidad:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stock insuficiente para salida")
-        sumi.stock_actual -= body.cantidad
+        sumi.stock_actual = stock - cantidad
+        cantidad_mov = cantidad
     elif body.tipo == TipoMovimiento.ajuste:
-        sumi.stock_actual = body.cantidad # El ajuste directo sobrescribe el stock
+        cantidad_mov = cantidad - stock  # delta antes de sobrescribir
+        sumi.stock_actual = cantidad  # El ajuste directo sobrescribe el stock
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tipo de movimiento inválido")
-        
+
     # Registrar el movimiento
     mov = MovimientoInventario(
         suministro_id=sumi.id,
         tipo=body.tipo,
-        cantidad=body.cantidad if body.tipo != TipoMovimiento.ajuste else (body.cantidad - sumi.stock_actual),
+        cantidad=cantidad_mov,
         motivo=body.motivo
     )
     db.add(mov)
