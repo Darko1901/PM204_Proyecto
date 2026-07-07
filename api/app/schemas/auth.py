@@ -21,4 +21,5 @@ class UsuarioOut(BaseModel):
     nombre_completo: str
     correo: str
     activo: bool
+    rol_id: int
     rol: RolOut

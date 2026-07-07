@@ -1,122 +1,166 @@
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from typing import List
 
 from app.core import roles
 from app.core.database import get_db
-from app.core.deps import require_roles
+from app.core.deps import get_current_user, require_roles
+from app.models.seguridad import Usuario
 from app.models.catalogo import Suministro
 from app.models.inventario import MovimientoInventario
-from app.schemas.catalogo import (
-    SuministroAjusteStock,
+from app.models.enums import TipoMovimiento
+from app.schemas.suministros import (
     SuministroCreate,
-    SuministroOut,
     SuministroUpdate,
+    SuministroOut,
+    MovimientoInventarioOut,
+    AjusteInventarioCreate,
 )
 
 router = APIRouter(prefix="/suministros", tags=["suministros"])
 
-
-@router.get("", response_model=list[SuministroOut])
+@router.get("", response_model=List[SuministroOut])
 def listar_suministros(
     activo: bool | None = None,
-    bajo_minimo: bool = False,
     db: Session = Depends(get_db),
-    _: object = Depends(require_roles(*roles.TODOS)),
-) -> list[Suministro]:
+    _: Usuario = Depends(get_current_user)
+) -> List[Suministro]:
     q = select(Suministro).order_by(Suministro.id)
     if activo is not None:
         q = q.where(Suministro.activo == activo)
-    if bajo_minimo:
-        q = q.where(Suministro.stock_actual < Suministro.stock_minimo)
     return list(db.execute(q).scalars().all())
 
+@router.get("/movimientos", response_model=List[MovimientoInventarioOut])
+def listar_movimientos(
+    suministro_id: int | None = None,
+    tipo: TipoMovimiento | None = None,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user)
+) -> List[MovimientoInventario]:
+    q = select(MovimientoInventario).options(joinedload(MovimientoInventario.suministro)).order_by(MovimientoInventario.creado_en.desc())
+    if suministro_id is not None:
+        q = q.where(MovimientoInventario.suministro_id == suministro_id)
+    if tipo is not None:
+        q = q.where(MovimientoInventario.tipo == tipo)
+        
+    movs = list(db.execute(q.limit(100)).scalars().all())
+    
+    # Mapear nombre del insumo
+    for m in movs:
+        m.suministro_nombre = m.suministro.nombre
+        
+    return movs
 
 @router.get("/{suministro_id}", response_model=SuministroOut)
 def obtener_suministro(
     suministro_id: int,
     db: Session = Depends(get_db),
-    _: object = Depends(require_roles(*roles.TODOS)),
+    _: Usuario = Depends(get_current_user)
 ) -> Suministro:
-    suministro = db.get(Suministro, suministro_id)
-    if suministro is None:
-        raise HTTPException(status_code=404, detail="Suministro no encontrado")
-    return suministro
+    sumi = db.get(Suministro, suministro_id)
+    if not sumi:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insumo/Suministro no encontrado")
+    return sumi
 
-
-@router.post("", response_model=SuministroOut, status_code=201)
+@router.post("", response_model=SuministroOut, status_code=status.HTTP_201_CREATED)
 def crear_suministro(
     body: SuministroCreate,
     db: Session = Depends(get_db),
-    _: object = Depends(require_roles(roles.ADMIN)),
+    _: Usuario = Depends(require_roles(roles.ADMIN))
 ) -> Suministro:
-    if db.execute(
-        select(Suministro).where(Suministro.nombre == body.nombre)
-    ).scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Ya existe un suministro con ese nombre")
-
-    suministro = Suministro(**body.model_dump())
-    db.add(suministro)
+    existe = db.execute(select(Suministro).where(Suministro.nombre == body.nombre)).scalar_one_or_none()
+    if existe:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya existe un suministro con este nombre")
+        
+    nuevo = Suministro(
+        nombre=body.nombre,
+        unidad=body.unidad,
+        stock_actual=body.stock_actual,
+        stock_minimo=body.stock_minimo,
+        activo=body.activo
+    )
+    db.add(nuevo)
     db.commit()
-    db.refresh(suministro)
-    return suministro
-
+    db.refresh(nuevo)
+    
+    # Si viene con stock inicial > 0, registrar movimiento
+    if nuevo.stock_actual > 0:
+        mov = MovimientoInventario(
+            suministro_id=nuevo.id,
+            tipo=TipoMovimiento.entrada,
+            cantidad=nuevo.stock_actual,
+            motivo="Stock inicial de creación",
+        )
+        db.add(mov)
+        db.commit()
+        
+    return nuevo
 
 @router.patch("/{suministro_id}", response_model=SuministroOut)
 def actualizar_suministro(
     suministro_id: int,
     body: SuministroUpdate,
     db: Session = Depends(get_db),
-    _: object = Depends(require_roles(roles.ADMIN)),
+    _: Usuario = Depends(require_roles(roles.ADMIN))
 ) -> Suministro:
-    suministro = db.get(Suministro, suministro_id)
-    if suministro is None:
-        raise HTTPException(status_code=404, detail="Suministro no encontrado")
-
-    datos = body.model_dump(exclude_unset=True)
-    if "nombre" in datos and datos["nombre"] != suministro.nombre:
-        if db.execute(
-            select(Suministro).where(
-                Suministro.nombre == datos["nombre"], Suministro.id != suministro_id
-            )
-        ).scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="Ya existe un suministro con ese nombre")
-
-    for campo, valor in datos.items():
-        setattr(suministro, campo, valor)
-
+    sumi = db.get(Suministro, suministro_id)
+    if not sumi:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insumo no encontrado")
+        
+    if body.nombre is not None:
+        duplicado = db.execute(
+            select(Suministro).where(Suministro.nombre == body.nombre, Suministro.id != suministro_id)
+        ).scalar_one_or_none()
+        if duplicado:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya existe otro suministro con este nombre")
+        sumi.nombre = body.nombre
+        
+    if body.unidad is not None:
+        sumi.unidad = body.unidad
+    if body.stock_minimo is not None:
+        sumi.stock_minimo = body.stock_minimo
+    if body.activo is not None:
+        sumi.activo = body.activo
+        
     db.commit()
-    db.refresh(suministro)
-    return suministro
+    db.refresh(sumi)
+    return sumi
 
-
-@router.patch("/{suministro_id}/ajuste", response_model=SuministroOut)
-def ajustar_stock(
+@router.post("/{suministro_id}/ajuste", response_model=SuministroOut)
+def registrar_ajuste(
     suministro_id: int,
-    body: SuministroAjusteStock,
+    body: AjusteInventarioCreate,
     db: Session = Depends(get_db),
-    _: object = Depends(require_roles(roles.ADMIN)),
+    _: Usuario = Depends(require_roles(roles.ADMIN, roles.CAJA))
 ) -> Suministro:
-    suministro = db.get(Suministro, suministro_id)
-    if suministro is None:
-        raise HTTPException(status_code=404, detail="Suministro no encontrado")
-
-    nuevo_stock = float(suministro.stock_actual) + body.cantidad
-    if nuevo_stock < 0:
-        raise HTTPException(status_code=409, detail="El ajuste dejaría el stock en negativo")
-
-    suministro.stock_actual = nuevo_stock
-    db.add(
-        MovimientoInventario(
-            suministro_id=suministro_id,
-            tipo="ajuste",
-            cantidad=abs(body.cantidad),
-            motivo=body.motivo or "ajuste",
-            creado_en=datetime.now(timezone.utc),
-        )
+    sumi = db.get(Suministro, suministro_id)
+    if not sumi:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insumo no encontrado")
+        
+    if body.cantidad <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La cantidad debe ser mayor a cero")
+        
+    # Calcular nuevo stock
+    if body.tipo == TipoMovimiento.entrada:
+        sumi.stock_actual += body.cantidad
+    elif body.tipo == TipoMovimiento.salida:
+        if sumi.stock_actual < body.cantidad:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stock insuficiente para salida")
+        sumi.stock_actual -= body.cantidad
+    elif body.tipo == TipoMovimiento.ajuste:
+        sumi.stock_actual = body.cantidad # El ajuste directo sobrescribe el stock
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tipo de movimiento inválido")
+        
+    # Registrar el movimiento
+    mov = MovimientoInventario(
+        suministro_id=sumi.id,
+        tipo=body.tipo,
+        cantidad=body.cantidad if body.tipo != TipoMovimiento.ajuste else (body.cantidad - sumi.stock_actual),
+        motivo=body.motivo
     )
+    db.add(mov)
     db.commit()
-    db.refresh(suministro)
-    return suministro
+    db.refresh(sumi)
+    return sumi
