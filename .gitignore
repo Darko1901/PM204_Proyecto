@@ -29,3 +29,8 @@ Thumbs.db
 # Claude Code
 CLAUDE.md
 .claude/
+
+# Auditoría (no versionar)
+docs/AUDITORIA_2P.md
+docs/PLAN_MERGE_2P.md
+docs/COMPARATIVA_MOVIL_2P.md
