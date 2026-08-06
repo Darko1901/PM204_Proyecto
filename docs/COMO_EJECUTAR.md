@@ -45,12 +45,17 @@ Variables que hay que definir en `.env` (las que vienen vacías en `.env.example
 | `POSTGRES_DB` | nombre de la BD (por defecto `cafeteria_db`) |
 | `JWT_SECRET` | secreto para firmar los JWT (cadena larga aleatoria) |
 | `APP_ENV` | `development` |
-| `ADMIN_EMAIL` | correo del usuario admin que creará el seed (tú lo eliges) |
-| `ADMIN_PASSWORD` | contraseña de ese admin (tú la eliges) |
+| `ADMIN_EMAIL` | correo del usuario admin (opcional; ver nota) |
+| `ADMIN_PASSWORD` | contraseña de ese admin (opcional; ver nota) |
 
-> **Credenciales del admin:** NO están en el repo (vienen vacías en `.env.example`). Las que
-> pongas en `ADMIN_EMAIL` / `ADMIN_PASSWORD` serán las que uses para hacer login. El `.env` está
-> en `.gitignore`: no se sube.
+> **Credenciales del admin:** `.env.example` ya trae `ADMIN_EMAIL=admin@cafeteria.com` y
+> `ADMIN_PASSWORD=cafe2026` — son las credenciales de evaluación académica definidas como
+> constantes en `api/app/seed.py` (`ADMIN_EMAIL_DEFAULT` / `ADMIN_PASSWORD_DEFAULT`). Si dejas
+> esas dos variables vacías en tu `.env`, el seed usa esas constantes igual; si les pones un
+> valor propio, ese valor gana. Los otros tres usuarios (mesero, caja, cocina) **no tienen
+> variable de entorno**: siempre salen de las constantes del seed. Tabla completa de las 4
+> cuentas en **[`docs/CREDENCIALES.md`](CREDENCIALES.md)**. El `.env` está en `.gitignore`: no
+> se sube.
 
 ### Paso a) Levantar API + PostgreSQL (Docker)
 
@@ -73,45 +78,65 @@ o abre en el navegador la documentación interactiva de FastAPI: **http://localh
 ### Paso b) Migración + seed (obligatorio la primera vez)
 
 El contenedor del API **no** corre las migraciones solo: hay que aplicarlas. La BD arranca vacía.
+Este es el **único camino oficial** para dejar la BD lista — nunca `init_db.py` ni
+`reset_clean.py` (ver Paso b.2).
 
 ```bash
 # 1) Crear las 13 tablas (migración inicial de Alembic; la URL la toma del entorno del contenedor)
 docker compose run --rm api alembic upgrade head
 
-# 2) Sembrar datos base: roles (administrador, cocina, caja, mesero) + usuario admin
+# 2) Sembrar roles + los 4 usuarios base
 docker compose run --rm api python -m app.seed
+
+# 2-bis) O, para tener también catálogo y datos de operación de ejemplo:
+docker compose run --rm api python -m app.seed --demo
 ```
 
-- El seed oficial (`api/app/seed.py`, que corres con `python -m app.seed`) crea los 4 roles y
-  **un solo usuario admin**, tomado de `ADMIN_EMAIL` / `ADMIN_PASSWORD` de tu `.env`. Si el admin
-  ya existe, no hace nada (es idempotente). **No crea usuarios de ejemplo** (mesero, cajero,
-  cocina) ni productos/ventas de demostración: tras el seed oficial es NORMAL ver únicamente tu
-  admin. Los demás usuarios se dan de alta desde el panel web.
+- `api/app/seed.py` (`python -m app.seed`) es la **única fuente de verdad** de usuarios: crea los
+  4 roles y **4 usuarios**, uno por rol, todos con dominio `@cafeteria.com`. Es idempotente
+  (correrlo otra vez no duplica nada). Las credenciales exactas están en
+  **[`docs/CREDENCIALES.md`](CREDENCIALES.md)**; en resumen, admin/mesero/caja/cocina con la
+  misma contraseña (`cafe2026` por defecto).
+- Con la bandera `--demo` además crea catálogo y operación: suministros (con 3 por debajo de su
+  mínimo, a propósito, para probar las alertas), productos en varias categorías con sus recetas,
+  mesas, y del orden de 150-160 cuentas repartidas en los últimos 60 días y en los 4 estados de
+  cuenta, con sus pagos, tickets y compras — para que el Dashboard y los tres reportes tengan
+  contenido real desde el primer arranque. También es idempotente: si ya hay cuentas sembradas,
+  la fase `--demo` no vuelve a insertar.
 
 > A partir de aquí el API ya responde con datos. Como el paso (a) dejó el API corriendo con
 > `--reload`, no hace falta reiniciarlo tras migrar/sembrar.
 
-### Paso b.2) Cargar datos de ejemplo (OPCIONAL)
+### Paso b.2) `init_db.py` y `reset_clean.py` — utilidades legacy, NO usar para la BD de evaluación
 
-Si quieres poblar la BD con **usuarios de ejemplo** (uno por rol) y **datos de demo**
-(productos, suministros, recetas, historial de ventas) para probar el dashboard, corre el script
-legacy `init_db.py`:
+Estos dos scripts siguen existiendo en `api/` pero **ya no crean usuarios propios**: ambos
+delegan en `api/app/seed.py` (`seed.run(demo=...)`), así que las credenciales que producen son
+siempre las mismas 4 cuentas `@cafeteria.com` de `docs/CREDENCIALES.md` — antes cada script traía
+las suyas y no coincidían entre sí, eso ya no puede pasar.
 
-```bash
-docker compose run --rm api python init_db.py
-```
+Aun así, **ninguno de los dos es el camino oficial** para preparar la BD que se va a presentar:
 
-Crea, entre otros: `mesero@cafeteria.com` (`mesero1234`), `cajero@cafeteria.com` (`caja1234`),
-`cocina@cafeteria.com` (`cocina1234`), además de un admin hardcodeado `admin@cafeteria.com`
-(`admin1234`) y catálogo/ventas de ejemplo. Es seguro correrlo sobre las tablas ya migradas (solo
-hace `create_all`, que no toca tablas existentes, y no re-inserta usuarios que ya existan por
-correo).
+- **`api/init_db.py`** — hace `Base.metadata.create_all(bind=engine)` y luego
+  `seed.run(demo=True)`. `create_all` **bypassa Alembic** por completo: crea las tablas leyendo
+  los modelos actuales, no reproduce el historial de migraciones. Es seguro correrlo sobre tablas
+  ya migradas (no las toca si ya existen, y el seed que llama es idempotente), pero **la tabla
+  `alembic_version` puede terminar sin relación real con cómo se construyó el esquema**.
+- **`api/reset_clean.py`** — hace `drop_all()` + `create_all()` y luego `seed.run(demo=...)`.
+  Mismo problema que `init_db.py`, agravado porque además **borra todo antes**. Ver Paso b.3.
 
-Advertencias sobre `init_db.py`:
-- **No es el camino oficial**: crea el esquema con `create_all` (bypassa Alembic) y usa
-  credenciales hardcodeadas. Úsalo solo para datos de demo, no como sustituto de la migración.
-- Los 4 usuarios de ejemplo usan el dominio `@cafeteria.com`, distinto del admin oficial de tu
-  `.env`. Tendrás dos admins (el tuyo `.env` y `admin@cafeteria.com`).
+> **Por qué importa:** `drop_all()`/`create_all()` operan sobre `Base.metadata` (los modelos de
+> SQLAlchemy), y la tabla `alembic_version` **no** es parte de esa metadata — Alembic la crea y
+> gestiona aparte. Si corres `alembic upgrade head` una vez y **después** corres
+> `reset_clean.py`/`init_db.py`, `alembic_version` se queda con el estado viejo (marcando
+> `head`) mientras las tablas reales fueron recreadas por `create_all`, no por la migración. El
+> comando `alembic current` puede entonces mostrar `head` sin que eso sea evidencia real de que
+> el esquema salió de Alembic. Para la BD que se presenta en la evaluación, la única secuencia
+> válida es la del Paso b: `down -v` → `up --build` → `alembic upgrade head` →
+> `python -m app.seed --demo`, sin `init_db.py` ni `reset_clean.py` de por medio, ni antes ni
+> después.
+
+Usa estos dos scripts solo para experimentar en local si quieres una vía rápida con `create_all`
+(por ejemplo, sin querer escribir una migración todavía); no para la BD final.
 
 > `api/check_db.py` es un script de inspección antiguo que apunta a un SQLite local
 > (`cafeteria.db`); no aplica al flujo con PostgreSQL/Docker y puedes ignorarlo.
@@ -120,9 +145,10 @@ Advertencias sobre `init_db.py`:
 
 Estos dos borran datos. Si ejecutas cualquiera, tus usuarios y demás registros **desaparecen**:
 
-- **`api/reset_clean.py`** — hace `drop_all()` (BORRA TODAS LAS TABLAS) y las recrea vacías,
-  dejando solo un admin hardcodeado `admin@cafeteria.com` / `admin1234`. Es una herramienta de
-  desarrollo para empezar de cero; **no la corras** salvo que quieras vaciar la BD a propósito.
+- **`api/reset_clean.py`** — hace `drop_all()` (BORRA TODAS LAS TABLAS), las recrea con
+  `create_all` (bypassando Alembic, ver Paso b.2) y vuelve a sembrar vía `seed.run(...)`. Es una
+  herramienta de desarrollo para empezar de cero rápido; **no la corras** en la BD que vas a usar
+  para la evaluación.
 - **`docker compose down -v`** — el `-v` borra el volumen `pgdata`, es decir, toda la BD.
 
 Si tras usar la app "de repente" faltan usuarios o datos de ejemplo, casi siempre es porque se
@@ -145,8 +171,14 @@ npm run dev
   sin tocar nada. (No hay `.env` ni variables `VITE_` en el web; si algún día el API cambia de host,
   se edita **esa línea**.)
 - **Confirmar que habla con el API:** abre http://localhost:5173, entra con el admin
-  (`ADMIN_EMAIL`/`ADMIN_PASSWORD`); si el login pasa y ves el dashboard, el web está hablando con
-  el API correctamente.
+  (`admin@cafeteria.com` / `cafe2026`, ver `docs/CREDENCIALES.md`); si el login pasa y ves el
+  dashboard, el web está hablando con el API correctamente.
+- **El portal web es exclusivo del rol administrador.** El login del web manda
+  `scope=portal_admin` en el `POST /auth/login`; el API responde `403` a cualquier usuario cuyo
+  rol no sea `administrador`, sin llegar a emitir token (`api/app/routers/auth.py`). Si pruebas
+  con `mesero@cafeteria.com`, `caja@cafeteria.com` o `cocina@cafeteria.com` en el web, es
+  **normal** que el login rechace con ese 403 — esas tres cuentas son para la app móvil, no para
+  el web.
 
 ### Paso d) Levantar el móvil (Expo SDK 54)
 
@@ -182,25 +214,29 @@ Cómo abrirlo (scripts de `mobile/coffeCode/package.json`):
 | **Web** | Abrir http://localhost:5173 y hacer login con el admin | Entra al dashboard |
 | **Móvil** | Escanear el QR con Expo Go | Carga el Login y navega por los 3 módulos (con datos mock) |
 
-**2–3 llamadas de prueba al API** (desde `/docs` o `curl`). Reemplaza `ADMIN_EMAIL`/`ADMIN_PASSWORD`
-por los de tu `.env`:
+**2–3 llamadas de prueba al API** (desde `/docs` o `curl`), con las credenciales de
+`docs/CREDENCIALES.md`:
 
 ```bash
 # 1) Login -> devuelve un access_token (form-urlencoded, campos username/password)
 curl -s -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  --data-urlencode "username=ADMIN_EMAIL" \
-  --data-urlencode "password=ADMIN_PASSWORD"
+  --data-urlencode "username=admin@cafeteria.com" \
+  --data-urlencode "password=cafe2026"
 # Esperado: 200 con {"access_token":"...","token_type":"bearer"}
 
 # 2) Guardar el token y consultar un endpoint protegido
 TOKEN="pega-aqui-el-access_token"
-curl -s http://localhost:8000/usuarios       -H "Authorization: Bearer $TOKEN"   # 200, lista de usuarios
-curl -s http://localhost:8000/estadisticas   -H "Authorization: Bearer $TOKEN"   # 200, métricas del dashboard
+curl -s http://localhost:8000/usuarios              -H "Authorization: Bearer $TOKEN"   # 200, lista de usuarios
+curl -s http://localhost:8000/estadisticas          -H "Authorization: Bearer $TOKEN"   # 200, métricas del dashboard (solo admin)
+curl -s "http://localhost:8000/reportes/preview?tipo=pedidos" -H "Authorization: Bearer $TOKEN"   # 200, filas del reporte
 ```
 
 Estado verificado en integración: `GET /health`, `POST /auth/login`, y un endpoint por bloque
-(cocina/caja/mesero/estadísticas/reportes) responden **200** con el token de admin.
+(cocina/caja/mesero/estadísticas/reportes) responden **200** con el token de admin. Con la BD
+sembrada vía `python -m app.seed --demo`, `GET /reportes/preview?tipo=pedidos` devuelve del orden
+de 150-160 filas, `tipo=productos` 9 y `tipo=inventario` 10 (los conteos exactos de pedidos
+varían porque el seed genera fechas/cantidades al azar).
 
 ---
 
@@ -213,14 +249,17 @@ docker compose down
 > NO uses `docker compose down -v`: el `-v` **borra el volumen** y perderías la BD (tendrías que
 > volver a migrar y sembrar). Tampoco corras `api/reset_clean.py` (ver Paso b.3): vacía la BD.
 
-**Re-arrancar al día siguiente** (versión corta — ya tienes `.env` y la BD ya está migrada/sembrada):
+**Re-arrancar al día siguiente (o el día de la evaluación)** — versión corta, con `.env` ya
+creado y la BD ya migrada/sembrada por el camino oficial (Paso b):
 ```bash
-docker compose up -d          # API + PostgreSQL
+docker compose up -d          # API + PostgreSQL (SIN --build, SIN alembic, SIN seed)
 cd web && npm run dev          # web (en otra terminal)
 cd mobile/coffeCode && npx expo start   # móvil (en otra terminal)
 ```
-La migración y el seed **no** se repiten (los datos siguen en `pgdata`). Solo los repites si
-borraste el volumen o cambiaste el esquema.
+La migración y el seed **no** se repiten (los datos siguen en el volumen `pgdata`). Solo los
+repites si borraste el volumen (`down -v`) o cambiaste el esquema — y si los repites, hazlo
+siempre por el camino del Paso b (`alembic upgrade head` + `python -m app.seed --demo`), nunca
+con `init_db.py` ni `reset_clean.py` (Paso b.2).
 
 ---
 
@@ -233,12 +272,24 @@ borraste el volumen o cambiaste el esquema.
 - **El API responde pero los endpoints fallan con error de BD / tabla inexistente:** te faltó el
   Paso b (`alembic upgrade head`). Córrelo.
 - **Login falla (401) aunque el API esté arriba:** no corriste `python -m app.seed`, o el
-  usuario/clave no coinciden con `ADMIN_EMAIL`/`ADMIN_PASSWORD` del `.env`.
+  usuario/clave no coinciden con los de `docs/CREDENCIALES.md` (por defecto
+  `admin@cafeteria.com` / `cafe2026`, y equivalente para mesero/caja/cocina).
+- **Login falla (403) con "Este portal es exclusivo para administradores":** es esperado si
+  intentas entrar al **web** con `mesero@cafeteria.com`, `caja@cafeteria.com` o
+  `cocina@cafeteria.com` — esas tres cuentas son para la app móvil, no para el panel web (ver
+  Paso c). No es un bug ni una BD mal sembrada.
 - **"De repente desaparecieron los usuarios / datos de ejemplo":** no es la migración ni el panel
   web. Se corrió un script destructivo (`api/reset_clean.py`, un `docker compose down -v`, o un
-  `alembic downgrade`). Recuerda que los usuarios de ejemplo NO los crea el seed oficial, sino
-  `init_db.py` (Paso b.2); si los quieres de vuelta, vuelve a correr ese script. El seed oficial
-  solo deja tu admin del `.env`.
+  `alembic downgrade`). Para recuperarlos, reconstruye por el camino oficial (Paso b): no hace
+  falta `init_db.py` — `python -m app.seed --demo` ya crea los 4 usuarios y todo el catálogo de
+  demostración.
+- **`alembic current` muestra `head` pero no confías en que la BD salió de una migración:**
+  puede pasar si después de migrar corriste `init_db.py` o `reset_clean.py` (Paso b.2): esos
+  scripts usan `create_all`/`drop_all`, que no tocan la tabla `alembic_version` para nada, así
+  que el "head" se queda ahí de una corrida anterior de `alembic upgrade head` aunque las tablas
+  reales se hayan recreado por fuera de Alembic. La única forma de estar seguro es no haber
+  corrido esos dos scripts después de migrar; si tienes duda, reconstruye desde cero con
+  `down -v` → `up --build` → `alembic upgrade head` → `python -m app.seed --demo`.
 - **`docker compose run` se queja de variables vacías:** falta el `.env` o tiene campos sin
   rellenar (Paso 0).
 - **Web con error de CORS o "Failed to fetch":** el API no está arriba, o `API_BASE_URL` en
@@ -266,7 +317,7 @@ de probar igual:
    Postman genera la colección. Luego define una variable `{{baseUrl}} = http://localhost:8000` y un
    Bearer token con el `access_token`.
 
-Los 48 endpoints registrados, agrupados por bloque (tal como están en el API):
+Los 49 endpoints registrados, agrupados por bloque (tal como están en el API):
 
 **Autenticación / base**
 - `POST /auth/login` · `GET /auth/me` · `GET /health`
@@ -293,9 +344,25 @@ Los 48 endpoints registrados, agrupados por bloque (tal como están en el API):
 - `GET /items` · `GET /items/{id}` · `PATCH /items/{id}/estado`
 - (también cocina puede actualizar detalle vía `PATCH /cuentas/detalles/{detalle_id}`)
 
-**Estadísticas / reportes**
-- `GET /estadisticas`
-- `GET /reportes/resumen` · `GET /reportes/ventas/hoy` · `GET /reportes/export/pdf` · `GET /reportes/export/xlsx`
+**Estadísticas / reportes** (todos exigen rol **administrador**, `require_roles(roles.ADMIN)`)
+- `GET /estadisticas?dias=30` — agregados para el Dashboard (gastos, ganancias, ventas por
+  producto). Antes aceptaba cualquier usuario autenticado; ahora exige administrador igual que el
+  resto de este bloque.
+- `GET /reportes/ventas/hoy` — sin parámetros, total y tickets emitidos del día.
+- `GET /reportes/resumen?desde&hasta&tipo_cuenta&categoria` — resumen con ventas por día y top/bottom de productos.
+- `GET /reportes/preview?tipo&desde&hasta&tipo_cuenta&categoria&solo_bajo_minimo&busqueda` — vista
+  previa en JSON (`columnas`, `filas`, `total_filas`, `filtros_aplicados`) que alimenta la tabla
+  de la pantalla Reportes del web.
+- `GET /reportes/export/pdf?tipo&desde&hasta&tipo_cuenta&categoria&solo_bajo_minimo&busqueda` — mismo filtrado, en PDF (reportlab).
+- `GET /reportes/export/xlsx?tipo&desde&hasta&tipo_cuenta&categoria&solo_bajo_minimo&busqueda` — mismo filtrado, en XLSX (openpyxl).
+  - `tipo` es obligatorio en `preview`/`export/*`: `pedidos` | `productos` | `inventario`
+    (`ventas` se sigue aceptando como alias histórico de `pedidos`).
+  - `tipo_cuenta` y `categoria` solo aplican al tipo `pedidos` y `productos` respectivamente;
+    `solo_bajo_minimo` y `busqueda` (nombre parcial, case-insensitive) aplican a `inventario`
+    (`busqueda` también a `productos`). El PDF y el XLSX imprimen los filtros aplicados como
+    subtítulo/encabezado.
 
 > Nota: casi todos los endpoints requieren `Authorization: Bearer <token>` y un rol adecuado
-> (`require_roles`). Con el usuario admin del seed puedes probar la mayoría.
+> (`require_roles`). Con el usuario admin del seed puedes probar la mayoría; el bloque de
+> Estadísticas/reportes y el resto del panel web solo funcionan con administrador (ver Paso c).
+> Credenciales completas en **[`docs/CREDENCIALES.md`](CREDENCIALES.md)**.
