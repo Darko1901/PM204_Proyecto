@@ -79,7 +79,11 @@ export const Menu = () => {
   };
 
   const eliminar = async (id) => {
-    if (!confirm('¿Eliminar este producto del menú?')) return;
+    // DELETE /productos/{id} borra de verdad solo si el producto nunca se ha
+    // vendido; si ya tiene ventas registradas, el API lo marca "no disponible"
+    // en su lugar (no puede borrarlo por la relación con el historial de
+    // cuentas). Avisamos las dos posibilidades para no confundir al usuario.
+    if (!confirm('¿Eliminar este producto? Si ya tiene ventas registradas, se marcará como no disponible en vez de borrarse.')) return;
     try { await api.eliminarProducto(id); load(); } catch (err) { alert(err.message); }
   };
 

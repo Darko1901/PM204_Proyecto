@@ -4,6 +4,12 @@ import { Plus, Pencil, Trash2, X, Info } from 'lucide-react';
 
 const EMPTY = { nombre: '', descripcion: '' };
 
+// Los 4 roles de los que dependen los guards de permisos (api/app/core/roles.py
+// roles.TODOS). El API ya rechaza renombrarlos o eliminarlos (409); esto es
+// solo para que la UI ni siquiera deje intentarlo.
+const ROLES_SISTEMA = ['administrador', 'mesero', 'caja', 'cocina'];
+const esRolSistema = (nombre) => ROLES_SISTEMA.includes(nombre);
+
 export const Roles = () => {
   const [roles, setRoles]     = useState([]);
   const [usuarios, setUsuarios] = useState([]);
@@ -28,7 +34,11 @@ export const Roles = () => {
   const countByRol = (rolId) => usuarios.filter(u => u.rol_id === rolId).length;
 
   const abrirCrear = () => { setForm(EMPTY); setError(''); setModal('crear'); };
-  const abrirEditar = (r) => { setForm({ nombre: r.nombre, descripcion: r.descripcion || '' }); setError(''); setModal({ type: 'editar', id: r.id }); };
+  const abrirEditar = (r) => {
+    setForm({ nombre: r.nombre, descripcion: r.descripcion || '' });
+    setError('');
+    setModal({ type: 'editar', id: r.id, esSistema: esRolSistema(r.nombre) });
+  };
 
   const guardar = async (e) => {
     e.preventDefault();
@@ -50,6 +60,7 @@ export const Roles = () => {
   };
 
   const eliminar = async (r) => {
+    if (esRolSistema(r.nombre)) return; // el botón ya está deshabilitado para estos
     const cnt = countByRol(r.id);
     if (cnt > 0) {
       alert(`No se puede eliminar. Hay ${cnt} usuario(s) asignados a este rol.`);
@@ -73,7 +84,7 @@ export const Roles = () => {
 
       <div className="notice notice-info">
         <Info size={16} />
-        <span><strong>Nota importante:</strong> Los roles con usuarios asignados no pueden ser eliminados. Primero debes reasignar o desactivar a los usuarios asociados.</span>
+        <span><strong>Nota importante:</strong> Los roles con usuarios asignados no pueden ser eliminados. Primero debes reasignar o desactivar a los usuarios asociados. Además, los 4 roles del sistema (administrador, mesero, caja, cocina) no se pueden renombrar ni eliminar bajo ninguna circunstancia: de su nombre exacto dependen los permisos.</span>
       </div>
 
       <div className="card">
@@ -97,7 +108,11 @@ export const Roles = () => {
               <tbody>
                 {roles.map((r, i) => {
                   const cnt = countByRol(r.id);
-                  const puedeEliminar = cnt === 0;
+                  const sistema = esRolSistema(r.nombre);
+                  const puedeEliminar = cnt === 0 && !sistema;
+                  const tituloEliminar = sistema
+                    ? 'Rol del sistema: no se puede eliminar'
+                    : (puedeEliminar ? 'Eliminar' : 'Tiene usuarios asignados');
                   return (
                     <tr key={r.id}>
                       <td style={{ fontWeight: 700, color: 'var(--text-muted)' }}>{String(i + 1).padStart(2, '0')}</td>
@@ -108,13 +123,15 @@ export const Roles = () => {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 4 }}>
-                          <button className="btn-icon edit" onClick={() => abrirEditar(r)} title="Editar">
+                          <button className="btn-icon edit" onClick={() => abrirEditar(r)}
+                            title={sistema ? 'Editar (el nombre de este rol no se puede cambiar)' : 'Editar'}>
                             <Pencil size={15} />
                           </button>
                           <button
                             className="btn-icon del"
                             onClick={() => eliminar(r)}
-                            title={puedeEliminar ? 'Eliminar' : 'Tiene usuarios asignados'}
+                            disabled={!puedeEliminar}
+                            title={tituloEliminar}
                             style={{ opacity: puedeEliminar ? 1 : 0.3, cursor: puedeEliminar ? 'pointer' : 'not-allowed' }}
                           >
                             <Trash2 size={15} />
@@ -144,7 +161,14 @@ export const Roles = () => {
                 <div className="form-group">
                   <label className="form-label">Nombre del rol</label>
                   <input className="form-control" required value={form.nombre}
+                    disabled={modal?.esSistema}
+                    title={modal?.esSistema ? 'Este rol lo usa el sistema de permisos: el nombre no se puede cambiar' : undefined}
                     onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} />
+                  {modal?.esSistema && (
+                    <small className="form-text" style={{ color: 'var(--text-muted)' }}>
+                      Este es uno de los 4 roles del sistema: su nombre está fijo porque los permisos dependen de él. Puedes editar la descripción.
+                    </small>
+                  )}
                 </div>
                 <div className="form-group">
                   <label className="form-label">Descripción</label>

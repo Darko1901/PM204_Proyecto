@@ -100,9 +100,6 @@ export const Suministros = () => {
           <p>Control de inventario y alertas de stock</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn btn-outline" onClick={() => setAjusteModal('selector')} id="btn-ajuste-stock">
-            <RefreshCw size={15} /> Ajustar Stock Manual
-          </button>
           <button className="btn btn-primary" onClick={abrirCrear} id="btn-nuevo-suministro">
             <Plus size={15} /> Nuevo Suministro
           </button>
@@ -254,8 +251,8 @@ export const Suministros = () => {
         </div>
       )}
 
-      {/* Modal ajuste stock */}
-      {ajusteModal && ajusteModal !== 'selector' && (
+      {/* Modal ajuste stock (ajusteModal siempre es el suministro elegido desde su fila) */}
+      {ajusteModal && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setAjusteModal(null)}>
           <div className="modal-box">
             <div className="modal-header">

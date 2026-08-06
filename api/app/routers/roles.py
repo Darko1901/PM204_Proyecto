@@ -49,7 +49,17 @@ def actualizar_rol(
     if not rol:
         raise HTTPException(status_code=404, detail="Rol no encontrado")
     if "nombre" in body and body["nombre"]:
-        rol.nombre = body["nombre"].strip()
+        nuevo_nombre = body["nombre"].strip()
+        # Los 4 nombres de rol están hardcodeados en app/core/roles.py y los
+        # compara require_roles() en cada request: renombrar uno de estos
+        # rompe los guards para todos los usuarios de ese rol (incluido quien
+        # hace el cambio) sin ninguna forma de revertirlo desde la API.
+        if rol.nombre in roles.TODOS and nuevo_nombre != rol.nombre:
+            raise HTTPException(
+                status_code=409,
+                detail="Este rol lo usa el sistema de permisos y no se puede renombrar.",
+            )
+        rol.nombre = nuevo_nombre
     if "descripcion" in body:
         rol.descripcion = body["descripcion"]
     db.commit()
@@ -66,6 +76,11 @@ def eliminar_rol(
     rol = db.get(Rol, rol_id)
     if not rol:
         raise HTTPException(status_code=404, detail="Rol no encontrado")
+    if rol.nombre in roles.TODOS:
+        raise HTTPException(
+            status_code=409,
+            detail="Este rol lo usa el sistema de permisos y no se puede eliminar.",
+        )
     # Verificar que no tenga usuarios
     tiene_usuarios = db.scalar(
         select(func.count()).select_from(Usuario).where(Usuario.rol_id == rol_id)

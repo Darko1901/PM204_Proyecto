@@ -40,7 +40,7 @@ export const Usuarios = () => {
   const abrirEditar = (u) => {
     setForm({ nombre_completo: u.nombre_completo, correo: u.correo, password: '', rol_id: u.rol_id, activo: u.activo });
     setError('');
-    setModal({ type: 'editar', id: u.id });
+    setModal({ type: 'editar', id: u.id, activoOriginal: u.activo });
   };
 
   const guardar = async (e) => {
@@ -51,9 +51,17 @@ export const Usuarios = () => {
       if (modal === 'crear') {
         await api.crearUsuario({ ...form, rol_id: Number(form.rol_id) });
       } else {
-        const payload = { nombre_completo: form.nombre_completo, correo: form.correo, rol_id: Number(form.rol_id), activo: form.activo };
-        if (form.password) payload.password = form.password;
+        // PATCH /usuarios/{id} (UsuarioUpdate) solo acepta nombre_completo,
+        // correo y rol_id — activo y password los ignora en silencio. Por
+        // eso van por sus propios endpoints (/estado y /password).
+        const payload = { nombre_completo: form.nombre_completo, correo: form.correo, rol_id: Number(form.rol_id) };
         await api.actualizarUsuario(modal.id, payload);
+        if (form.activo !== modal.activoOriginal) {
+          await api.cambiarEstadoUsuario(modal.id, form.activo);
+        }
+        if (form.password) {
+          await api.resetearPasswordUsuario(modal.id, form.password);
+        }
       }
       setModal(null);
       load();
@@ -65,8 +73,16 @@ export const Usuarios = () => {
   };
 
   const eliminar = async (id) => {
-    if (!confirm('¿Eliminar este usuario?')) return;
-    try { await api.actualizarUsuario(id, { activo: false }); load(); } catch (_) {}
+    if (!confirm('¿Desactivar este usuario?')) return;
+    try {
+      // PATCH /usuarios/{id} (actualizarUsuario) no acepta el campo `activo`
+      // (UsuarioUpdate no lo incluye): la API lo ignora y responde 200 sin
+      // cambiar nada. El endpoint que sí desactiva es /usuarios/{id}/estado.
+      await api.cambiarEstadoUsuario(id, false);
+      load();
+    } catch (err) {
+      alert(err.message || 'Error al desactivar el usuario');
+    }
   };
 
   const rolNombre = (id) => roles.find(r => r.id === id)?.nombre || '—';
