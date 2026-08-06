@@ -11,14 +11,16 @@ import { Menu }        from './components/Menu';
 import { Recetas }     from './components/Recetas';
 import { Reportes }    from './components/Reportes';
 
+// El portal completo es exclusivo para administrador (ver AuthContext /
+// api/app/routers/auth.py), así que aquí ya no se filtra por rol.
 const VISTAS = {
-  dashboard:   { component: Dashboard,   roles: ['admin', 'cajero', 'mesero', 'cocinero'] },
-  usuarios:    { component: Usuarios,    roles: ['admin'] },
-  roles:       { component: Roles,       roles: ['admin'] },
-  suministros: { component: Suministros, roles: ['admin', 'cajero', 'cocinero'] },
-  menu:        { component: Menu,        roles: ['admin', 'cajero'] },
-  recetas:     { component: Recetas,     roles: ['admin'] },
-  reportes:    { component: Reportes,    roles: ['admin', 'cajero'] },
+  dashboard:   { component: Dashboard },
+  usuarios:    { component: Usuarios },
+  roles:       { component: Roles },
+  suministros: { component: Suministros },
+  menu:        { component: Menu },
+  recetas:     { component: Recetas },
+  reportes:    { component: Reportes },
 };
 
 const Shell = () => {

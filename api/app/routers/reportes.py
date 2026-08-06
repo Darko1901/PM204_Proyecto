@@ -21,7 +21,23 @@ from app.schemas.reportes import (
 
 router = APIRouter(prefix="/reportes", tags=["reportes"])
 
-_TIPOS_VALIDOS = {"ventas", "productos", "inventario"}
+# "ventas" es el nombre histórico del reporte de pedidos; se acepta como alias
+# de entrada para no romper clientes existentes, pero internamente (título,
+# nombre de archivo, hoja de xlsx) todo usa "pedidos".
+_TIPOS_VALIDOS = {"pedidos", "ventas", "productos", "inventario"}
+_ALIAS_TIPO = {"ventas": "pedidos"}
+
+_LABEL_TIPO_CUENTA = {"en_mesa": "Mesa", "para_llevar": "Para llevar"}
+
+
+def _normalizar_tipo(tipo: str) -> str:
+    return _ALIAS_TIPO.get(tipo, tipo)
+
+
+def _tipo_normalizado_o_422(tipo: str) -> str:
+    if tipo not in _TIPOS_VALIDOS:
+        raise HTTPException(status_code=422, detail=f"Tipo de reporte inválido: {tipo}")
+    return _normalizar_tipo(tipo)
 
 
 def _rango_datetime(desde: date | None, hasta: date | None) -> tuple[datetime | None, datetime | None]:
@@ -50,7 +66,11 @@ def _query_ventas_por_dia(
 
 
 def _query_productos_vendidos(
-    db: Session, desde: date | None, hasta: date | None, categoria: str | None
+    db: Session,
+    desde: date | None,
+    hasta: date | None,
+    categoria: str | None,
+    busqueda: str | None = None,
 ) -> list[tuple[int, str, float]]:
     inicio, fin = _rango_datetime(desde, hasta)
     q = (
@@ -70,6 +90,8 @@ def _query_productos_vendidos(
         q = q.where(Cuenta.cerrada_en <= fin)
     if categoria:
         q = q.where(Producto.categoria == categoria)
+    if busqueda:
+        q = q.where(Producto.nombre.ilike(f"%{busqueda}%"))
     q = q.group_by(Producto.id, Producto.nombre)
 
     filas = db.execute(q).all()
@@ -134,6 +156,67 @@ def resumen(
     )
 
 
+def _texto_filtro_fechas(desde: date | None, hasta: date | None) -> str:
+    d = desde.isoformat() if desde else "Todos"
+    h = hasta.isoformat() if hasta else "Todos"
+    return f"Del {d} al {h}"
+
+
+def _texto_filtros(
+    tipo: str,
+    desde: date | None,
+    hasta: date | None,
+    tipo_cuenta: str | None,
+    categoria: str | None,
+    solo_bajo_minimo: bool,
+    busqueda: str | None = None,
+) -> str:
+    """Línea legible con los filtros aplicados, para imprimir en PDF/XLSX.
+    Solo incluye los filtros relevantes para `tipo` (los mismos que la UI
+    muestra); un filtro no enviado se marca explícitamente como "Todos"."""
+    if tipo == "pedidos":
+        tc = _LABEL_TIPO_CUENTA.get(tipo_cuenta, "Todos")
+        return f"{_texto_filtro_fechas(desde, hasta)} · Tipo de cuenta: {tc}"
+    if tipo == "productos":
+        return (
+            f"{_texto_filtro_fechas(desde, hasta)} · Categoría: {categoria or 'Todas'}"
+            f" · Búsqueda: {busqueda or 'Todos'}"
+        )
+    if tipo == "inventario":
+        return (
+            f"Solo por debajo del mínimo: {'Sí' if solo_bajo_minimo else 'No'}"
+            f" · Búsqueda: {busqueda or 'Todos'}"
+        )
+    return ""
+
+
+def _filtros_aplicados(
+    tipo: str,
+    desde: date | None,
+    hasta: date | None,
+    tipo_cuenta: str | None,
+    categoria: str | None,
+    solo_bajo_minimo: bool,
+    busqueda: str | None = None,
+) -> dict:
+    if tipo == "pedidos":
+        return {
+            "desde": desde.isoformat() if desde else None,
+            "hasta": hasta.isoformat() if hasta else None,
+            "tipo_cuenta": tipo_cuenta or "ambos",
+        }
+    if tipo == "productos":
+        return {
+            "desde": desde.isoformat() if desde else None,
+            "hasta": hasta.isoformat() if hasta else None,
+            "categoria": categoria,
+            "busqueda": busqueda,
+        }
+    if tipo == "inventario":
+        return {"solo_bajo_minimo": solo_bajo_minimo, "busqueda": busqueda}
+    return {}
+
+
 def _filas_export(
     db: Session,
     tipo: str,
@@ -141,8 +224,10 @@ def _filas_export(
     hasta: date | None,
     tipo_cuenta: str | None,
     categoria: str | None,
+    solo_bajo_minimo: bool = False,
+    busqueda: str | None = None,
 ) -> tuple[list[str], list[list[str]]]:
-    if tipo == "ventas":
+    if tipo == "pedidos":
         inicio, fin = _rango_datetime(desde, hasta)
         q = select(Ticket, Cuenta).join(Cuenta, Ticket.cuenta_id == Cuenta.id)
         if inicio:
@@ -158,7 +243,9 @@ def _filas_export(
             [
                 t.folio,
                 t.emitido_en.strftime("%Y-%m-%d %H:%M") if t.emitido_en else "",
-                c.tipo,
+                # c.tipo es un enum (TipoCuenta); .value evita que openpyxl lo
+                # serialice como "TipoCuenta.en_mesa" en vez de "en_mesa".
+                c.tipo.value if hasattr(c.tipo, "value") else c.tipo,
                 f"{t.total:.2f}",
             ]
             for t, c in filas
@@ -166,14 +253,19 @@ def _filas_export(
         return encabezados, datos
 
     if tipo == "productos":
-        productos = _query_productos_vendidos(db, desde, hasta, categoria)
+        productos = _query_productos_vendidos(db, desde, hasta, categoria, busqueda)
         productos.sort(key=lambda p: p[2], reverse=True)
         encabezados = ["Producto", "Cantidad vendida"]
         datos = [[nombre, f"{cantidad:g}"] for _id, nombre, cantidad in productos]
         return encabezados, datos
 
     if tipo == "inventario":
-        suministros = list(db.execute(select(Suministro).order_by(Suministro.nombre)).scalars())
+        q = select(Suministro).order_by(Suministro.nombre)
+        if solo_bajo_minimo:
+            q = q.where(Suministro.stock_actual < Suministro.stock_minimo)
+        if busqueda:
+            q = q.where(Suministro.nombre.ilike(f"%{busqueda}%"))
+        suministros = list(db.execute(q).scalars())
         encabezados = ["Suministro", "Unidad", "Stock actual", "Stock mínimo", "Bajo mínimo"]
         datos = [
             [
@@ -190,31 +282,61 @@ def _filas_export(
     raise HTTPException(status_code=422, detail=f"Tipo de reporte inválido: {tipo}")
 
 
-@router.get("/export/pdf")
-def exportar_pdf(
-    tipo: str = Query(..., description="ventas | productos | inventario"),
+@router.get("/preview")
+def previsualizar_reporte(
+    tipo: str = Query(..., description="pedidos | productos | inventario"),
     desde: date | None = None,
     hasta: date | None = None,
     tipo_cuenta: str | None = None,
     categoria: str | None = None,
+    solo_bajo_minimo: bool = False,
+    busqueda: str | None = Query(None, description="Filtro por nombre (solo productos/inventario)"),
+    db: Session = Depends(get_db),
+    _: object = Depends(require_roles(roles.ADMIN)),
+) -> dict:
+    tipo = _tipo_normalizado_o_422(tipo)
+    columnas, filas = _filas_export(db, tipo, desde, hasta, tipo_cuenta, categoria, solo_bajo_minimo, busqueda)
+    return {
+        "columnas": columnas,
+        "filas": filas,
+        "total_filas": len(filas),
+        "filtros_aplicados": _filtros_aplicados(
+            tipo, desde, hasta, tipo_cuenta, categoria, solo_bajo_minimo, busqueda
+        ),
+    }
+
+
+@router.get("/export/pdf")
+def exportar_pdf(
+    tipo: str = Query(..., description="pedidos | productos | inventario"),
+    desde: date | None = None,
+    hasta: date | None = None,
+    tipo_cuenta: str | None = None,
+    categoria: str | None = None,
+    solo_bajo_minimo: bool = False,
+    busqueda: str | None = Query(None, description="Filtro por nombre (solo productos/inventario)"),
     db: Session = Depends(get_db),
     _: object = Depends(require_roles(roles.ADMIN)),
 ) -> StreamingResponse:
-    if tipo not in _TIPOS_VALIDOS:
-        raise HTTPException(status_code=422, detail=f"Tipo de reporte inválido: {tipo}")
+    tipo = _tipo_normalizado_o_422(tipo)
 
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
     from reportlab.lib.styles import getSampleStyleSheet
 
-    encabezados, datos = _filas_export(db, tipo, desde, hasta, tipo_cuenta, categoria)
+    encabezados, datos = _filas_export(db, tipo, desde, hasta, tipo_cuenta, categoria, solo_bajo_minimo, busqueda)
+    subtitulo = _texto_filtros(tipo, desde, hasta, tipo_cuenta, categoria, solo_bajo_minimo, busqueda)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
     estilos = getSampleStyleSheet()
     titulo = f"Reporte de {tipo} — CoffeeCode Cafetería"
-    elementos = [Paragraph(titulo, estilos["Title"]), Spacer(1, 12)]
+    elementos = [
+        Paragraph(titulo, estilos["Title"]),
+        Paragraph(subtitulo, estilos["Normal"]),
+        Spacer(1, 12),
+    ]
 
     tabla_datos = [encabezados] + datos if datos else [encabezados, ["Sin datos en el rango seleccionado"]]
     tabla = Table(tabla_datos)
@@ -243,27 +365,34 @@ def exportar_pdf(
 
 @router.get("/export/xlsx")
 def exportar_xlsx(
-    tipo: str = Query(..., description="ventas | productos | inventario"),
+    tipo: str = Query(..., description="pedidos | productos | inventario"),
     desde: date | None = None,
     hasta: date | None = None,
     tipo_cuenta: str | None = None,
     categoria: str | None = None,
+    solo_bajo_minimo: bool = False,
+    busqueda: str | None = Query(None, description="Filtro por nombre (solo productos/inventario)"),
     db: Session = Depends(get_db),
     _: object = Depends(require_roles(roles.ADMIN)),
 ) -> StreamingResponse:
-    if tipo not in _TIPOS_VALIDOS:
-        raise HTTPException(status_code=422, detail=f"Tipo de reporte inválido: {tipo}")
+    tipo = _tipo_normalizado_o_422(tipo)
 
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
-    encabezados, datos = _filas_export(db, tipo, desde, hasta, tipo_cuenta, categoria)
+    encabezados, datos = _filas_export(db, tipo, desde, hasta, tipo_cuenta, categoria, solo_bajo_minimo, busqueda)
+    subtitulo = _texto_filtros(tipo, desde, hasta, tipo_cuenta, categoria, solo_bajo_minimo, busqueda)
 
     wb = Workbook()
     ws = wb.active
     ws.title = tipo[:31]
+
+    ws.append([f"Reporte de {tipo} — CoffeeCode Cafetería"])
+    ws.append([subtitulo])
+    ws.append([])
     ws.append(encabezados)
-    for celda in ws[1]:
+    fila_encabezado = ws.max_row
+    for celda in ws[fila_encabezado]:
         celda.font = Font(bold=True)
     for fila in datos:
         ws.append(fila)

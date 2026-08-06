@@ -3,6 +3,9 @@ import { api } from './api';
 
 const AuthContext = createContext(null);
 
+const ROL_ADMIN = 'administrador';
+const MSG_SOLO_ADMIN = 'Este portal es exclusivo para administradores.';
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -15,9 +18,17 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
       return;
     }
-    
+
     try {
       const userData = await api.getMe();
+      // Defensa adicional: cubre un token viejo de un usuario no-admin que
+      // haya quedado en localStorage de antes de exigir el scope en el login.
+      if (userData.rol?.nombre !== ROL_ADMIN) {
+        localStorage.removeItem('token');
+        setUser(null);
+        setError(MSG_SOLO_ADMIN);
+        return;
+      }
       setUser(userData);
       setError(null);
     } catch (err) {
@@ -41,6 +52,12 @@ export const AuthProvider = ({ children }) => {
       const data = await api.login(correo, password);
       localStorage.setItem('token', data.access_token);
       const userData = await api.getMe();
+      if (userData.rol?.nombre !== ROL_ADMIN) {
+        localStorage.removeItem('token');
+        setUser(null);
+        setError(MSG_SOLO_ADMIN);
+        throw new Error(MSG_SOLO_ADMIN);
+      }
       setUser(userData);
       return userData;
     } catch (err) {
@@ -57,18 +74,12 @@ export const AuthProvider = ({ children }) => {
     setError(null);
   };
 
-  const checkRole = (allowedRoles) => {
-    if (!user) return false;
-    return allowedRoles.includes(user.rol.nombre);
-  };
-
   const value = {
     user,
     loading,
     error,
     login,
     logout,
-    checkRole,
     refreshUser: checkAuth
   };
 

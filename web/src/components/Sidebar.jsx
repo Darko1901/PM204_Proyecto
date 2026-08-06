@@ -18,7 +18,8 @@ export const Sidebar = ({ activeTab, onNavigate }) => {
   const { user, logout } = useAuth();
   if (!user) return null;
 
-  // Todos los items siempre visibles (panel solo para admin)
+  // El portal es exclusivo para administrador (ver AuthContext), así que
+  // todos los ítems son siempre visibles: no hay otro rol que filtrar.
   const items = NAV;
 
   return (

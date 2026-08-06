@@ -3,7 +3,7 @@ import { useAuth } from '../AuthContext';
 import { Eye, EyeOff, Coffee } from 'lucide-react';
 
 export const Login = () => {
-  const { login } = useAuth();
+  const { login, error: authError } = useAuth();
   const [correo, setCorreo] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -23,6 +23,10 @@ export const Login = () => {
     }
   };
 
+  // authError cubre casos detectados fuera del submit (p. ej. un token viejo
+  // de un usuario no-admin que AuthContext rechazó al cargar la página).
+  const errorVisible = error || authError;
+
   return (
     <div className="login-page">
       <div className="login-card fade-in">
@@ -36,7 +40,7 @@ export const Login = () => {
           <p>Panel de Administración</p>
         </div>
 
-        {error && <div className="login-error">{error}</div>}
+        {errorVisible && <div className="login-error">{errorVisible}</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">

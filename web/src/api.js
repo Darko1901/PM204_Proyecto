@@ -11,6 +11,17 @@ const getHeaders = () => {
   return headers;
 };
 
+// Arma un query string a partir de un objeto, omitiendo valores vacíos
+// (null/undefined/''), para no mandar filtros "en blanco" al API.
+const buildQuery = (params) => {
+  const qs = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === '') return;
+    qs.append(key, value);
+  });
+  return qs.toString();
+};
+
 const handleResponse = async (response) => {
   if (!response.ok) {
     let errorMsg = 'Error en la petición';
@@ -50,7 +61,9 @@ export const api = {
     const params = new URLSearchParams();
     params.append('username', username);
     params.append('password', password);
-    
+    // Exige rol administrador en el API: el portal web es exclusivo para ese rol.
+    params.append('scope', 'portal_admin');
+
     const response = await fetch(`${API_BASE_URL}/auth/login`, {
       method: 'POST',
       headers: {
@@ -380,7 +393,7 @@ export const api = {
   },
 
   // --- PEDIDOS (historial de cuentas) ---
-  getPedidos: async (estado = 'pagado') => {
+  getPedidos: async (estado = 'pagada') => {
     let url = `${API_BASE_URL}/cuentas`;
     if (estado) url += `?estado=${estado}`;
     const response = await fetch(url, {
@@ -395,5 +408,35 @@ export const api = {
       headers: getHeaders(),
     });
     return handleResponse(response);
+  },
+
+  // --- REPORTES (generados en el servidor) ---
+  getReportePreview: async (filtros) => {
+    const response = await fetch(`${API_BASE_URL}/reportes/preview?${buildQuery(filtros)}`, {
+      headers: getHeaders(),
+    });
+    return handleResponse(response);
+  },
+
+  descargarReportePDF: async (filtros) => {
+    const response = await fetch(`${API_BASE_URL}/reportes/export/pdf?${buildQuery(filtros)}`, {
+      headers: getHeaders(),
+    });
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.detail || 'Error al generar el PDF');
+    }
+    return response.blob();
+  },
+
+  descargarReporteXLSX: async (filtros) => {
+    const response = await fetch(`${API_BASE_URL}/reportes/export/xlsx?${buildQuery(filtros)}`, {
+      headers: getHeaders(),
+    });
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.detail || 'Error al generar el XLSX');
+    }
+    return response.blob();
   },
 };

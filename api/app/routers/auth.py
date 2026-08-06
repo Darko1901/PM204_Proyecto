@@ -3,6 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from app.core import roles
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.security import create_access_token, verify_password
@@ -11,6 +12,10 @@ from app.schemas.auth import Token, UsuarioOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# Scope que manda el portal web para exigir rol administrador en el login.
+# Si no viene (p. ej. la app móvil), el comportamiento es el de siempre.
+SCOPE_PORTAL_ADMIN = "portal_admin"
+
 
 @router.post("/login", response_model=Token)
 def login(
@@ -18,7 +23,9 @@ def login(
     db: Session = Depends(get_db),
 ) -> Token:
     user = db.execute(
-        select(Usuario).where(Usuario.correo == form_data.username)
+        select(Usuario)
+        .options(joinedload(Usuario.rol))
+        .where(Usuario.correo == form_data.username)
     ).scalar_one_or_none()
 
     if user is None or not verify_password(form_data.password, user.password_hash):
@@ -30,6 +37,12 @@ def login(
 
     if not user.activo:
         raise HTTPException(status_code=403, detail="Usuario inactivo")
+
+    if SCOPE_PORTAL_ADMIN in form_data.scopes and user.rol.nombre != roles.ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Este portal es exclusivo para administradores.",
+        )
 
     return Token(access_token=create_access_token(user.id))
 

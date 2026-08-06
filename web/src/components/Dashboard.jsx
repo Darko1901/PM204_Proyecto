@@ -11,13 +11,23 @@ export const Dashboard = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        const [s, c, inv] = await Promise.all([
+        // Cuenta.estado (EstadoCuenta) no tiene un valor "activo": una cuenta
+        // "en curso" es la que sigue abierta o ya está por cobrarse. El API
+        // solo filtra por un único `estado` a la vez (GET /cuentas?estado=),
+        // así que pedimos los dos estados en curso y los mezclamos aquí en
+        // vez de tocar el endpoint para una sola pantalla.
+        const [s, abiertas, porCobrar, inv] = await Promise.all([
           api.getEstadisticas(1),
-          api.getCuentas('activo'),
+          api.getCuentas('abierta'),
+          api.getCuentas('por_cobrar'),
           api.getSuministros(),
         ]);
         setStats(s);
-        setCuentas(Array.isArray(c) ? c : []);
+        const enCurso = [
+          ...(Array.isArray(abiertas) ? abiertas : []),
+          ...(Array.isArray(porCobrar) ? porCobrar : []),
+        ].sort((a, b) => b.id - a.id);
+        setCuentas(enCurso);
         setSuministros(Array.isArray(inv) ? inv : []);
       } catch (_) {}
       finally { setLoading(false); }
@@ -27,12 +37,13 @@ export const Dashboard = () => {
 
   const bajosMinimo = suministros.filter(s => s.stock_actual <= s.stock_minimo);
 
+  // Claves = valores reales de EstadoCuenta (api/app/models/enums.py).
   const estadoBadge = (estado) => {
     const map = {
-      'activo':      { cls: 'badge-primary', label: 'En preparación' },
-      'listo':       { cls: 'badge-success', label: 'Listo' },
-      'pendiente':   { cls: 'badge-warning', label: 'Pendiente' },
-      'pagado':      { cls: 'badge-neutral', label: 'Pagado' },
+      'abierta':     { cls: 'badge-primary', label: 'Abierta' },
+      'por_cobrar':  { cls: 'badge-warning', label: 'Por cobrar' },
+      'pagada':      { cls: 'badge-neutral', label: 'Pagada' },
+      'cancelada':   { cls: 'badge-danger',  label: 'Cancelada' },
     };
     const m = map[estado] || { cls: 'badge-neutral', label: estado };
     return <span className={`badge ${m.cls}`}>{m.label}</span>;

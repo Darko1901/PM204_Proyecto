@@ -6,7 +6,7 @@ from typing import Dict, List, Any
 
 from app.core import roles
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_roles
+from app.core.deps import require_roles
 from app.models.seguridad import Usuario
 from app.models.finanzas import Compra, Pago
 from app.models.operacion import Cuenta, DetalleCuenta
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/estadisticas", tags=["estadisticas"])
 def obtener_estadisticas(
     dias: int = 30,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(get_current_user)
+    _: Usuario = Depends(require_roles(roles.ADMIN))
 ) -> Dict[str, Any]:
     fecha_limite = datetime.now() - timedelta(days=dias)
     

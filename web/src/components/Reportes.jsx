@@ -1,105 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../api';
-import { FileText, FileSpreadsheet, Calendar } from 'lucide-react';
-
-/* ── Exportar PDF ─────────────────────────────────────────────── */
-async function exportPDF(titulo, stats, ganancias, gastos, productos, pedidos, suministros) {
-  const { jsPDF } = await import('jspdf');
-  const { default: autoTable } = await import('jspdf-autotable');
-  const doc = new jsPDF({ orientation: 'landscape' });
-  doc.setFontSize(16); doc.setFont('helvetica', 'bold');
-  doc.text(titulo, 14, 18);
-  doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-  doc.text(`Generado: ${new Date().toLocaleString('es-MX')}`, 14, 25);
-  
-  // 1. Resumen Financiero
-  doc.text("Resumen Financiero", 14, 35);
-  autoTable(doc, {
-    startY: 40,
-    head: [['Fecha', 'Ventas ($)', 'Gastos ($)', 'Utilidad ($)']],
-    body: ganancias.map((g, i) => [
-      g.fecha,
-      g.monto.toFixed(2),
-      (gastos[i]?.monto || 0).toFixed(2),
-      (g.monto - (gastos[i]?.monto || 0)).toFixed(2),
-    ]),
-    headStyles: { fillColor: [18, 83, 119], textColor: 255 },
-    styles: { fontSize: 8 },
-  });
-
-  // 2. Inventario (Suministros)
-  autoTable(doc, {
-    startY: doc.lastAutoTable.finalY + 15,
-    head: [['Insumo', 'Unidad', 'Stock Actual', 'Stock Mínimo', 'Estado']],
-    body: suministros.map(s => [
-      s.nombre,
-      s.unidad,
-      s.stock_actual.toFixed(2),
-      s.stock_minimo.toFixed(2),
-      s.stock_actual <= s.stock_minimo ? 'Crítico' : 'OK'
-    ]),
-    headStyles: { fillColor: [84, 112, 127], textColor: 255 },
-    styles: { fontSize: 8 },
-  });
-
-
-  // 4. Pedidos (Cuentas)
-  autoTable(doc, {
-    startY: doc.lastAutoTable.finalY + 15,
-    head: [['Folio / ID', 'Fecha', 'Tipo', 'Estado', 'Total ($)']],
-    body: pedidos.map(p => [
-      `#${String(p.id).padStart(4, '0')}`,
-      new Date(p.abierta_en).toLocaleString('es-MX'),
-      p.tipo,
-      p.estado,
-      p.total.toFixed(2)
-    ]),
-    headStyles: { fillColor: [112, 119, 160], textColor: 255 },
-    styles: { fontSize: 8 },
-  });
-
-  doc.save(`${titulo}.pdf`);
-}
-
-async function exportXLSX(ganancias, gastos, productos, pedidos, suministros) {
-  const XLSX = await import('xlsx');
-  const wb = XLSX.utils.book_new();
-
-  // Hoja 1: Financiero
-  const rowsFin = ganancias.map((g, i) => ({
-    Fecha: g.fecha,
-    'Ventas ($)': g.monto,
-    'Gastos ($)': gastos[i]?.monto || 0,
-    'Utilidad ($)': g.monto - (gastos[i]?.monto || 0),
-  }));
-  const wsFin = XLSX.utils.json_to_sheet(rowsFin);
-  XLSX.utils.book_append_sheet(wb, wsFin, 'Financiero');
-
-  // Hoja 2: Inventario
-  const rowsInv = suministros.map(s => ({
-    Insumo: s.nombre,
-    Unidad: s.unidad,
-    'Stock Actual': s.stock_actual,
-    'Stock Mínimo': s.stock_minimo,
-    Estado: s.stock_actual <= s.stock_minimo ? 'Crítico' : 'OK'
-  }));
-  const wsInv = XLSX.utils.json_to_sheet(rowsInv);
-  XLSX.utils.book_append_sheet(wb, wsInv, 'Inventario');
-
-
-  // Hoja 4: Pedidos
-  const rowsPed = pedidos.map(p => ({
-    'Folio / ID': `#${String(p.id).padStart(4, '0')}`,
-    Fecha: new Date(p.abierta_en).toLocaleString('es-MX'),
-    Tipo: p.tipo,
-    Estado: p.estado,
-    'Total ($)': p.total
-  }));
-  const wsPed = XLSX.utils.json_to_sheet(rowsPed);
-  XLSX.utils.book_append_sheet(wb, wsPed, 'Pedidos');
-
-  XLSX.writeFile(wb, 'Reporte_CoffeeCode.xlsx');
-}
+import { FileText, FileSpreadsheet, Calendar, ListFilter } from 'lucide-react';
 
 /* ── Gráfico de líneas SVG ─────────────────────────────────────── */
 const LineChart = ({ data, color, label }) => {
@@ -188,36 +89,154 @@ const BarChart = ({ ganancias, gastos }) => {
   );
 };
 
+/* ── Helpers de fecha (YYYY-MM-DD en huso local, para los <input type="date">) ── */
+const pad2 = (n) => String(n).padStart(2, '0');
+const toISODate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+const TIPOS_REPORTE = [
+  { value: 'pedidos', label: 'Pedidos' },
+  { value: 'productos', label: 'Productos' },
+  { value: 'inventario', label: 'Inventario' },
+];
+
 /* ── Vista principal ─────────────────────────────────────────────── */
 export const Reportes = () => {
+  // --- Datos de la sección "Estadísticas" (gráficas) ---
   const [stats, setStats]   = useState(null);
   const [productos, setProductos] = useState([]);
-  const [pedidos, setPedidos] = useState([]);
   const [suministros, setSuministros] = useState([]);
   const [dias, setDias]     = useState(30);
   const [loading, setLoading] = useState(true);
 
+  // --- Filtros de la sección "Reportes" (servidor) ---
+  const [tipoReporte, setTipoReporte]     = useState('pedidos');
+  const [desde, setDesde]                 = useState('');
+  const [hasta, setHasta]                 = useState('');
+  const [tipoCuenta, setTipoCuenta]       = useState('');
+  const [categoriaFiltro, setCategoriaFiltro] = useState('');
+  const [soloBajoMinimo, setSoloBajoMinimo]   = useState(false);
+  const [busqueda, setBusqueda]           = useState('');
+  const [busquedaDebounced, setBusquedaDebounced] = useState('');
+
+  // Debounce del texto de búsqueda: evita un fetch por cada tecla.
+  useEffect(() => {
+    const t = setTimeout(() => setBusquedaDebounced(busqueda), 300);
+    return () => clearTimeout(t);
+  }, [busqueda]);
+
+  // --- Vista previa y descarga (servidor) ---
+  const [preview, setPreview]           = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(true);
+  const [previewError, setPreviewError] = useState('');
+  const [descargando, setDescargando]   = useState(false);
+  const [descargaError, setDescargaError] = useState('');
+
   const load = async () => {
     setLoading(true);
     try {
-      const [dataStats, dataProd, dataPed, dataSum] = await Promise.all([
+      const [dataStats, dataProd, dataSum] = await Promise.all([
         api.getEstadisticas(dias),
         api.getProductos(),
-        api.getPedidos('pagada'),
-        api.getSuministros()
+        api.getSuministros(),
       ]);
       setStats(dataStats);
       setProductos(Array.isArray(dataProd) ? dataProd : []);
-      setPedidos(Array.isArray(dataPed) ? dataPed : []);
       setSuministros(Array.isArray(dataSum) ? dataSum : []);
     } catch (err) {
-      console.error("Error cargando reportes:", err);
+      console.error("Error cargando estadísticas:", err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => { load(); }, [dias]);
+
+  // Categorías reales del catálogo (para el select de "Productos"), sin pedir un endpoint nuevo.
+  const categoriasDisponibles = useMemo(() => {
+    const set = new Set(productos.map(p => p.categoria).filter(Boolean));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [productos]);
+
+  // Filtros que de verdad aplican según el tipo de reporte elegido — los
+  // mismos que se muestran en la UI (sección B3) viajan al API tal cual.
+  const filtrosActuales = useMemo(() => {
+    if (tipoReporte === 'pedidos') {
+      return { tipo: 'pedidos', desde: desde || undefined, hasta: hasta || undefined, tipo_cuenta: tipoCuenta || undefined };
+    }
+    if (tipoReporte === 'productos') {
+      return {
+        tipo: 'productos',
+        desde: desde || undefined,
+        hasta: hasta || undefined,
+        categoria: categoriaFiltro || undefined,
+        busqueda: busquedaDebounced || undefined,
+      };
+    }
+    return { tipo: 'inventario', solo_bajo_minimo: soloBajoMinimo, busqueda: busquedaDebounced || undefined };
+  }, [tipoReporte, desde, hasta, tipoCuenta, categoriaFiltro, soloBajoMinimo, busquedaDebounced]);
+
+  useEffect(() => {
+    let vigente = true;
+    (async () => {
+      setPreviewLoading(true);
+      setPreviewError('');
+      try {
+        const data = await api.getReportePreview(filtrosActuales);
+        if (vigente) setPreview(data);
+      } catch (err) {
+        if (vigente) {
+          setPreview(null);
+          setPreviewError(err.message || 'Error al cargar la vista previa');
+        }
+      } finally {
+        if (vigente) setPreviewLoading(false);
+      }
+    })();
+    return () => { vigente = false; };
+  }, [filtrosActuales]);
+
+  const rangoHoy = () => { const t = toISODate(new Date()); setDesde(t); setHasta(t); };
+  const rangoUltimosDias = (n) => {
+    const hoy = new Date();
+    const inicio = new Date(hoy);
+    inicio.setDate(inicio.getDate() - (n - 1));
+    setDesde(toISODate(inicio));
+    setHasta(toISODate(hoy));
+  };
+  const rangoEsteMes = () => {
+    const hoy = new Date();
+    const inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    setDesde(toISODate(inicio));
+    setHasta(toISODate(hoy));
+  };
+
+  const nombreArchivo = (ext) => {
+    const hoy = new Date();
+    const fecha = `${hoy.getFullYear()}${pad2(hoy.getMonth() + 1)}${pad2(hoy.getDate())}`;
+    return `reporte_${tipoReporte}_${fecha}.${ext}`;
+  };
+
+  const descargar = async (formato) => {
+    setDescargaError('');
+    setDescargando(true);
+    try {
+      const blob = formato === 'pdf'
+        ? await api.descargarReportePDF(filtrosActuales)
+        : await api.descargarReporteXLSX(filtrosActuales);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = nombreArchivo(formato);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setDescargaError(err.message || 'Error al descargar el archivo');
+    } finally {
+      setDescargando(false);
+    }
+  };
 
   const fmt = (n) => `$${Number(n || 0).toLocaleString('es-MX', { minimumFractionDigits: 0 })}`;
 
@@ -230,29 +249,19 @@ export const Reportes = () => {
         </div>
       </div>
 
-      {/* Filtros */}
+      {/* ═══════════════════ SECCIÓN: ESTADÍSTICAS (gráficas) ═══════════════════ */}
+      <div className="section-title" style={{ fontSize: '1rem', marginBottom: 12 }}>Estadísticas</div>
+
       <div className="card card-body" style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
-          <div className="form-group" style={{ marginBottom: 0, minWidth: 160 }}>
-            <label className="form-label"><Calendar size={13} style={{ marginRight: 4 }} />Período (Gráficos)</label>
-            <select className="form-control" value={dias} onChange={e => setDias(Number(e.target.value))}>
-              <option value={7}>Última semana</option>
-              <option value={15}>Últimos 15 días</option>
-              <option value={30}>Últimos 30 días</option>
-              <option value={90}>Últimos 3 meses</option>
-              <option value={180}>Últimos 6 meses</option>
-            </select>
-          </div>
-          <div style={{ display: 'flex', gap: 10, marginLeft: 'auto' }}>
-            <button className="btn btn-outline btn-sm"
-              onClick={() => stats && exportPDF('Reporte_CoffeeCode', stats, stats.ganancias_por_dia, stats.gastos_por_dia, productos, pedidos, suministros)}>
-              <FileText size={14} /> Descargar PDF
-            </button>
-            <button className="btn btn-outline btn-sm" style={{ color: 'var(--success)', borderColor: 'var(--success)' }}
-              onClick={() => stats && exportXLSX(stats.ganancias_por_dia, stats.gastos_por_dia, productos, pedidos, suministros)}>
-              <FileSpreadsheet size={14} /> Descargar XLSX
-            </button>
-          </div>
+        <div className="form-group" style={{ marginBottom: 0, minWidth: 160, maxWidth: 220 }}>
+          <label className="form-label"><Calendar size={13} style={{ marginRight: 4 }} />Período (Gráficos)</label>
+          <select className="form-control" value={dias} onChange={e => setDias(Number(e.target.value))}>
+            <option value={7}>Última semana</option>
+            <option value={15}>Últimos 15 días</option>
+            <option value={30}>Últimos 30 días</option>
+            <option value={90}>Últimos 3 meses</option>
+            <option value={180}>Últimos 6 meses</option>
+          </select>
         </div>
       </div>
 
@@ -306,9 +315,8 @@ export const Reportes = () => {
             </div>
           </div>
 
-          {/* Tablas de Reportes Adicionales */}
+          {/* Tablas de apoyo */}
           <div className="grid-2" style={{ alignItems: 'flex-start' }}>
-            
             {/* Top productos */}
             <div className="card">
               <div className="card-body" style={{ paddingBottom: 0 }}>
@@ -343,7 +351,7 @@ export const Reportes = () => {
                     <tr><th>Insumo</th><th>Stock</th><th>Mínimo</th><th>Estado</th></tr>
                   </thead>
                   <tbody>
-                    {suministros.filter(s => s.stock_actual <= s.stock_minimo).length > 0 ? 
+                    {suministros.filter(s => s.stock_actual <= s.stock_minimo).length > 0 ?
                       suministros.filter(s => s.stock_actual <= s.stock_minimo).map(s => (
                       <tr key={s.id}>
                         <td style={{ fontWeight: 600 }}>{s.nombre}</td>
@@ -356,11 +364,131 @@ export const Reportes = () => {
                 </table>
               </div>
             </div>
-            
           </div>
         </>
       )}
+
+      {/* ═══════════════════ SECCIÓN: REPORTES (servidor, con filtros) ═══════════════════ */}
+      <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '32px 0 20px' }} />
+      <div className="section-title" style={{ fontSize: '1rem', marginBottom: 12 }}>
+        <ListFilter size={16} style={{ marginRight: 6, verticalAlign: -3 }} />
+        Reportes
+      </div>
+
+      <div className="card card-body" style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+          <div className="form-group" style={{ marginBottom: 0, minWidth: 160 }}>
+            <label className="form-label">Tipo de reporte</label>
+            <select className="form-control" value={tipoReporte} onChange={e => setTipoReporte(e.target.value)}>
+              {TIPOS_REPORTE.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </div>
+
+          {(tipoReporte === 'pedidos' || tipoReporte === 'productos') && (
+            <>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Desde</label>
+                <input type="date" className="form-control" value={desde} onChange={e => setDesde(e.target.value)} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Hasta</label>
+                <input type="date" className="form-control" value={hasta} onChange={e => setHasta(e.target.value)} />
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn-outline btn-sm" onClick={rangoHoy}>Hoy</button>
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => rangoUltimosDias(7)}>Últimos 7 días</button>
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => rangoUltimosDias(30)}>Últimos 30 días</button>
+                <button type="button" className="btn btn-outline btn-sm" onClick={rangoEsteMes}>Este mes</button>
+              </div>
+            </>
+          )}
+
+          {tipoReporte === 'pedidos' && (
+            <div className="form-group" style={{ marginBottom: 0, minWidth: 140 }}>
+              <label className="form-label">Tipo de cuenta</label>
+              <select className="form-control" value={tipoCuenta} onChange={e => setTipoCuenta(e.target.value)}>
+                <option value="">Ambos</option>
+                <option value="en_mesa">Mesa</option>
+                <option value="para_llevar">Para llevar</option>
+              </select>
+            </div>
+          )}
+
+          {tipoReporte === 'productos' && (
+            <div className="form-group" style={{ marginBottom: 0, minWidth: 160 }}>
+              <label className="form-label">Categoría</label>
+              <select className="form-control" value={categoriaFiltro} onChange={e => setCategoriaFiltro(e.target.value)}>
+                <option value="">Todas</option>
+                {categoriasDisponibles.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          )}
+
+          {tipoReporte === 'inventario' && (
+            <div className="form-group" style={{ marginBottom: 0, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" id="chk-bajo-minimo" checked={soloBajoMinimo}
+                onChange={e => setSoloBajoMinimo(e.target.checked)} />
+              <label htmlFor="chk-bajo-minimo" className="form-label" style={{ marginBottom: 0 }}>
+                Solo por debajo del mínimo
+              </label>
+            </div>
+          )}
+
+          {(tipoReporte === 'productos' || tipoReporte === 'inventario') && (
+            <div className="form-group" style={{ marginBottom: 0, minWidth: 180 }}>
+              <label className="form-label">
+                {tipoReporte === 'productos' ? 'Buscar producto' : 'Buscar suministro'}
+              </label>
+              <input type="text" className="form-control" value={busqueda}
+                onChange={e => setBusqueda(e.target.value)}
+                placeholder="Nombre..." />
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 10, marginLeft: 'auto' }}>
+            <button className="btn btn-outline btn-sm" disabled={descargando} onClick={() => descargar('pdf')}>
+              <FileText size={14} /> Descargar PDF
+            </button>
+            <button className="btn btn-outline btn-sm" style={{ color: 'var(--success)', borderColor: 'var(--success)' }}
+              disabled={descargando} onClick={() => descargar('xlsx')}>
+              <FileSpreadsheet size={14} /> Descargar XLSX
+            </button>
+          </div>
+        </div>
+
+        {descargaError && <div className="login-error" style={{ marginTop: 12 }}>{descargaError}</div>}
+      </div>
+
+      <div className="card">
+        <div className="card-body" style={{ paddingBottom: 0 }}>
+          <div className="toolbar">
+            <div className="section-title" style={{ margin: 0 }}>Vista previa</div>
+            {preview && !previewLoading && (
+              <span className="badge badge-neutral">{preview.total_filas} registros</span>
+            )}
+          </div>
+        </div>
+        <div className="table-wrap">
+          {previewLoading ? (
+            <div className="loader-wrap"><div className="spinner" /><span>Cargando vista previa...</span></div>
+          ) : previewError ? (
+            <div className="empty-state"><p>{previewError}</p></div>
+          ) : !preview || preview.filas.length === 0 ? (
+            <div className="empty-state"><p>Sin registros para los filtros seleccionados</p></div>
+          ) : (
+            <table>
+              <thead>
+                <tr>{preview.columnas.map(col => <th key={col}>{col}</th>)}</tr>
+              </thead>
+              <tbody>
+                {preview.filas.map((fila, i) => (
+                  <tr key={i}>{fila.map((valor, j) => <td key={j}>{valor}</td>)}</tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
-
