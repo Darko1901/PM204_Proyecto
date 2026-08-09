@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
@@ -119,39 +119,12 @@ export default function TicketScreen({ route, navigation }) {
           </Text>
         </View>
 
-        {/* Acciones */}
-        <View style={styles.simulatedActionsRow}>
-          <TouchableOpacity
-            style={styles.simulatedBtn}
-            onPress={() => Alert.alert('Impresión', 'Imprimiendo ticket en la impresora térmica de barra...')}
-          >
-            <Ionicons name="print-outline" size={18} color={colors.primary} />
-            <Text style={styles.simulatedBtnText}>Imprimir</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.simulatedBtn}
-            onPress={() => Alert.alert('Envío', 'Enviando comprobante digital al cliente por correo y WhatsApp...')}
-          >
-            <Ionicons name="share-social-outline" size={18} color={colors.primary} />
-            <Text style={styles.simulatedBtnText}>Enviar</Text>
-          </TouchableOpacity>
-        </View>
-
         <TouchableOpacity
           style={styles.finalizarBtn}
           onPress={() => navigation.popToTop()}
         >
           <Ionicons name="checkmark-circle" size={20} color={colors.bg} />
           <Text style={styles.finalizarBtnText}>Finalizar Cobro</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.homeBtn}
-          onPress={() => navigation.popToTop()}
-        >
-          <Ionicons name="home-outline" size={18} color={colors.primary} />
-          <Text style={styles.homeBtnText}>Ir al Inicio</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -253,28 +226,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   ticketAtendio: { textAlign: 'center', fontSize: fontSize.sm, color: colors.textMuted },
-  simulatedActionsRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.md,
-  },
-  simulatedBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.primary + '44',
-    backgroundColor: colors.bgCard,
-  },
-  simulatedBtnText: {
-    color: colors.primary,
-    fontWeight: '600',
-    fontSize: fontSize.md,
-  },
   finalizarBtn: {
     backgroundColor: colors.primary,
     borderRadius: radius.md,
@@ -283,22 +234,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.sm,
     paddingVertical: spacing.md,
-    marginBottom: spacing.md,
+    marginTop: spacing.md,
   },
   finalizarBtnText: {
     color: colors.bg,
     fontWeight: '700',
     fontSize: fontSize.md,
   },
-  homeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  homeBtnText: { color: colors.textSecondary, fontWeight: '600', fontSize: fontSize.md },
 });

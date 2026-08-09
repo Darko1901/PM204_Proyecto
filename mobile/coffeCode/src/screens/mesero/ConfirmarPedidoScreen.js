@@ -34,17 +34,19 @@ export default function ConfirmarPedidoScreen({ route, navigation }) {
       observaciones: c.nota.trim() !== '' ? c.nota.trim() : null,
     }));
 
-    try {
-      // La cuenta ya existe en la BD → agregar detalles.
-      // Solo se considera existente si tiene un id entero real (no un marcador local).
-      const esCuentaExistente = Number.isInteger(cuenta?.id);
-      const cuentaReal = esCuentaExistente
-        ? await addDetalles(cuenta.id, detalles)
-        : await createCuenta({
-            mesa_id: cuenta?.tipo === 'en_mesa' ? (cuenta?.mesa?.id ?? cuenta?.mesa_id) : null,
-            tipo: cuenta?.tipo || 'para_llevar',
-            detalles,
-          });
+try {
+        // La cuenta ya existe en la BD → agregar detalles.
+        // Solo se considera existente si tiene un id entero real (no un marcador local).
+        const esCuentaExistente = Number.isInteger(cuenta?.id);
+        await (
+          esCuentaExistente
+            ? addDetalles(cuenta.id, detalles)
+            : createCuenta({
+                mesa_id: cuenta?.tipo === 'en_mesa' ? (cuenta?.mesa?.id ?? cuenta?.mesa_id) : null,
+                tipo: cuenta?.tipo || 'para_llevar',
+                detalles,
+              })
+        );
 
       setEnviando(false);
       Alert.alert(
@@ -55,11 +57,8 @@ export default function ConfirmarPedidoScreen({ route, navigation }) {
             text: 'Aceptar',
             onPress: () => {
               navigation.reset({
-                index: 1,
-                routes: [
-                  { name: 'Home', params: { usuario } },
-                  { name: 'DetalleCuenta', params: { cuenta: cuentaReal, usuario } },
-                ],
+                index: 0,
+                routes: [{ name: 'Home', params: { usuario } }],
               });
             },
           },
