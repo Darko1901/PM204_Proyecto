@@ -1,17 +1,34 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
-import { mockCompras } from '../../data/mockData';
+import { getCompras } from '../../api/compras';
 
 export default function HistorialComprasScreen({ route, navigation }) {
   const { usuario } = route.params || {};
   const isFocused = useIsFocused();
+  const [compras, setCompras] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const totalGastado = mockCompras.reduce((s, c) => s + c.total, 0);
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    try {
+      setCompras(await getCompras());
+    } catch (e) {
+      setCompras([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isFocused) cargar();
+  }, [isFocused, cargar]);
+
+  const totalGastado = compras.reduce((s, c) => s + (Number(c.total) || 0), 0);
 
   const formatFecha = (iso) => new Date(iso).toLocaleDateString('es-MX', {
     day: '2-digit', month: 'short', year: 'numeric',
@@ -23,8 +40,10 @@ export default function HistorialComprasScreen({ route, navigation }) {
   const renderCompra = ({ item }) => (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
-        <View>
-          <Text style={styles.proveedor}>{item.proveedor ?? 'Sin proveedor'}</Text>
+        <View style={styles.cardLeft}>
+          <Text style={styles.proveedor} numberOfLines={2} ellipsizeMode="tail">
+            {item.proveedor ?? 'Sin proveedor'}
+          </Text>
           <View style={styles.fechaRow}>
             <Ionicons name="calendar-outline" size={12} color={colors.textMuted} />
             <Text style={styles.fecha}>{formatFecha(item.comprado_en)} · {formatHora(item.comprado_en)}</Text>
@@ -38,7 +57,7 @@ export default function HistorialComprasScreen({ route, navigation }) {
       {/* Líneas */}
       {item.detalles.map((d, i) => (
         <View key={i} style={styles.lineaRow}>
-          <Text style={styles.lineaNombre}>{d.suministro.nombre}</Text>
+          <Text style={styles.lineaNombre}>{d.suministro_nombre || d.suministro?.nombre}</Text>
           <Text style={styles.lineaQty}>{d.cantidad}</Text>
           <Text style={styles.lineaCosto}>${d.costo_unitario}/u</Text>
           <Text style={styles.lineaSubtotal}>${(d.cantidad * d.costo_unitario).toFixed(2)}</Text>
@@ -61,7 +80,7 @@ export default function HistorialComprasScreen({ route, navigation }) {
       {/* Resumen */}
       <View style={styles.resumenCard}>
         <View style={styles.resumenItem}>
-          <Text style={styles.resumenNum}>{mockCompras.length}</Text>
+          <Text style={styles.resumenNum}>{compras.length}</Text>
           <Text style={styles.resumenLbl}>Compras</Text>
         </View>
         <View style={styles.resumenDivider} />
@@ -72,18 +91,25 @@ export default function HistorialComprasScreen({ route, navigation }) {
         <View style={styles.resumenDivider} />
         <View style={styles.resumenItem}>
           <Text style={styles.resumenNum}>
-            ${(totalGastado / mockCompras.length).toFixed(2)}
+            ${compras.length > 0 ? (totalGastado / compras.length).toFixed(2) : '0.00'}
           </Text>
           <Text style={styles.resumenLbl}>Promedio</Text>
         </View>
       </View>
 
+      {loading ? (
+        <View style={styles.empty}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : (
       <FlatList
-        data={mockCompras}
+        data={compras}
         keyExtractor={item => String(item.id)}
         renderItem={renderCompra}
         contentContainerStyle={styles.lista}
         showsVerticalScrollIndicator={false}
+        onRefresh={cargar}
+        refreshing={loading}
         ListHeaderComponent={<Text style={styles.listaLabel}>Registro reciente</Text>}
         ListEmptyComponent={
           <View style={styles.empty}>
@@ -92,6 +118,7 @@ export default function HistorialComprasScreen({ route, navigation }) {
           </View>
         }
       />
+      )}
 
       {/* FAB nueva compra */}
       <TouchableOpacity
@@ -126,7 +153,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   resumenItem: { flex: 1, alignItems: 'center' },
-  resumenNum: { fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
+  resumenNum: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary, flexShrink: 1 },
   resumenLbl: { fontSize: fontSize.xs, color: colors.textMuted },
   resumenDivider: { width: 1, backgroundColor: colors.border, marginVertical: spacing.xs },
   listaLabel: {
@@ -152,16 +179,17 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: spacing.sm,
   },
+  cardLeft: { flex: 1, marginRight: spacing.sm },
   proveedor: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary, marginBottom: 2 },
   fechaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   fecha: { fontSize: fontSize.xs, color: colors.textMuted },
-  total: { fontSize: fontSize.lg, fontWeight: '700', color: colors.primary },
+  total: { flexShrink: 0, fontSize: fontSize.lg, fontWeight: '700', color: colors.primary },
   separator: { height: 1, backgroundColor: colors.border, marginBottom: spacing.sm },
   lineaRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs },
-  lineaNombre: { flex: 1, fontSize: fontSize.sm, color: colors.textSecondary },
-  lineaQty: { fontSize: fontSize.sm, color: colors.textMuted, width: 36, textAlign: 'center' },
-  lineaCosto: { fontSize: fontSize.sm, color: colors.textMuted, width: 60, textAlign: 'right' },
-  lineaSubtotal: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary, width: 60, textAlign: 'right' },
+  lineaNombre: { flex: 1, flexShrink: 1, marginRight: spacing.xs, fontSize: fontSize.sm, color: colors.textSecondary },
+  lineaQty: { fontSize: fontSize.sm, color: colors.textMuted, width: 36, flexShrink: 1, textAlign: 'center' },
+  lineaCosto: { fontSize: fontSize.sm, color: colors.textMuted, minWidth: 60, flexShrink: 1, textAlign: 'right' },
+  lineaSubtotal: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary, minWidth: 60, flexShrink: 1, textAlign: 'right' },
   empty: { alignItems: 'center', paddingVertical: spacing.xxl, gap: spacing.md },
   emptyText: { color: colors.textMuted, fontSize: fontSize.md },
   fab: {

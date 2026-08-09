@@ -1,23 +1,51 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
-import { mockMesas, mockCuentas } from '../../data/mockData';
+import { getMesas, getCuentas } from '../../api/operaciones';
 import ScalePressable from '../../components/ScalePressable';
+
+const ESTADO_ACTIVOS = ['abierta', 'por_cobrar'];
 
 export default function ListaMesasScreen({ route, navigation }) {
   const { usuario, soloDisponibles } = route.params || {};
   const isFocused = useIsFocused();
-  const mesas = mockMesas;
+  const [mesas, setMesas] = useState([]);
+  const [cuentas, setCuentas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const libres = mesas.filter(m => m.activa && !m.ocupada).length;
-  const ocupadas = mesas.filter(m => m.activa && m.ocupada).length;
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [mesasRes, cuentasRes] = await Promise.all([getMesas(), getCuentas()]);
+      setMesas(mesasRes);
+      setCuentas(cuentasRes);
+    } catch (e) {
+      setError(e?.message || 'No se pudieron cargar las mesas.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isFocused) {
+      cargar();
+    }
+  }, [isFocused, cargar]);
+
+  const ocupaMesa = (mesaId) =>
+    cuentas.some(c => c.mesa_id === mesaId && ESTADO_ACTIVOS.includes(c.estado));
+
+  const cuentaDeMesa = (mesaId) =>
+    cuentas.find(c => c.mesa_id === mesaId && ESTADO_ACTIVOS.includes(c.estado));
 
   const mesasFiltradas = mesas.filter(m => {
-    if (soloDisponibles) return m.activa && !m.ocupada;
+    if (soloDisponibles) return m.activa && !ocupaMesa(m.id);
     return m.activa;
   });
 
@@ -32,7 +60,6 @@ export default function ListaMesasScreen({ route, navigation }) {
           style={[styles.mesaCard, { borderColor: colors.primary + '55' }]}
           onPress={() => {
             const cuentaNueva = {
-              id: Date.now(),
               tipo: 'para_llevar',
               estado: 'abierta',
               total: 0,
@@ -43,10 +70,10 @@ export default function ListaMesasScreen({ route, navigation }) {
           }}
         >
           <View style={[styles.mesaIndicator, { backgroundColor: colors.primary }]} />
-          <Text style={styles.mesaNumero}>Para Llevar</Text>
+          <Text style={styles.mesaNumero} numberOfLines={1} ellipsizeMode="tail">Para Llevar</Text>
           <View style={styles.mesaInfo}>
             <Ionicons name="bag-handle-outline" size={14} color={colors.textMuted} />
-            <Text style={styles.mesaCapacidad}>Sin mesa física</Text>
+            <Text style={styles.mesaCapacidad} numberOfLines={1}>Sin mesa física</Text>
           </View>
           <View style={[styles.estadoBadge, { backgroundColor: colors.primary + '22' }]}>
             <Text style={[styles.estadoText, { color: colors.primary }]}>Llevar</Text>
@@ -56,14 +83,12 @@ export default function ListaMesasScreen({ route, navigation }) {
       );
     }
 
-    const cuentaMesa = mockCuentas.find(c => c.mesa_id === item.id && c.estado === 'por_cobrar');
+    const cuentaMesa = cuentaDeMesa(item.id);
     const estado = !item.activa
       ? 'inactiva'
       : cuentaMesa
-        ? 'por_cobrar'
-        : item.ocupada
-          ? 'ocupada'
-          : 'libre';
+        ? (cuentaMesa.estado === 'por_cobrar' ? 'por_cobrar' : 'ocupada')
+        : 'libre';
 
     const estadoColors = {
       libre: colors.success,
@@ -84,21 +109,25 @@ export default function ListaMesasScreen({ route, navigation }) {
         onPress={() => {
           if (soloDisponibles) {
             navigation.navigate('Menu', {
-              cuenta: { id: Date.now(), mesa: item, tipo: 'en_mesa', estado: 'abierta', total: 0, detalles: [], mesero_id: usuario?.id },
+              cuenta: { mesa: item, tipo: 'en_mesa', estado: 'abierta', total: 0, detalles: [], mesero_id: usuario?.id },
               usuario
             });
           } else {
             if (estado === 'libre') navigation.navigate('AbrirCuenta', { mesa: item, usuario });
-            else if (estado === 'ocupada' || estado === 'por_cobrar') navigation.navigate('DetalleCuenta', { mesa: item, usuario });
+            else if (estado === 'ocupada' || estado === 'por_cobrar') navigation.navigate('DetalleCuenta', {
+              cuentaId: cuentaMesa?.id,
+              mesa: item,
+              usuario,
+            });
           }
         }}
         disabled={estado === 'inactiva'}
       >
         <View style={[styles.mesaIndicator, { backgroundColor: estadoColors[estado] }]} />
-        <Text style={styles.mesaNumero}>Mesa {item.numero}</Text>
+        <Text style={styles.mesaNumero} numberOfLines={1} ellipsizeMode="tail">Mesa {item.numero}</Text>
         <View style={styles.mesaInfo}>
           <Ionicons name="people-outline" size={14} color={colors.textMuted} />
-          <Text style={styles.mesaCapacidad}>{item.capacidad} personas</Text>
+          <Text style={styles.mesaCapacidad} numberOfLines={1}>{item.capacidad} personas</Text>
         </View>
         <View style={[styles.estadoBadge, { backgroundColor: estadoColors[estado] + '22' }]}>
           <Text style={[styles.estadoText, { color: estadoColors[estado] }]}>
@@ -135,6 +164,19 @@ export default function ListaMesasScreen({ route, navigation }) {
 
 
 
+      {loading && mesas.length === 0 ? (
+        <View style={styles.centerBox}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : error ? (
+        <View style={styles.centerBox}>
+          <Ionicons name="cloud-offline-outline" size={40} color={colors.textMuted} />
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity onPress={cargar}>
+            <Text style={styles.retryText}>Reintentar</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
       <FlatList
         data={mesasMostradas}
         keyExtractor={item => String(item.id)}
@@ -143,7 +185,10 @@ export default function ListaMesasScreen({ route, navigation }) {
         contentContainerStyle={styles.grid}
         columnWrapperStyle={styles.row}
         showsVerticalScrollIndicator={false}
+        onRefresh={cargar}
+        refreshing={loading}
       />
+      )}
     </View>
   );
 }
@@ -192,7 +237,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radius.lg,
   },
   mesaNumero: {
-    fontSize: fontSize.lg,
+    fontSize: fontSize.md,
     fontWeight: '700',
     color: colors.textPrimary,
     marginTop: spacing.sm,
@@ -204,7 +249,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     marginBottom: spacing.md,
   },
-  mesaCapacidad: { fontSize: fontSize.xs, color: colors.textMuted },
+  mesaCapacidad: { flexShrink: 1, fontSize: fontSize.xs, color: colors.textMuted },
   estadoBadge: {
     alignSelf: 'flex-start',
     borderRadius: radius.full,
@@ -213,4 +258,7 @@ const styles = StyleSheet.create({
   },
   estadoText: { fontSize: 10, fontWeight: '600' },
   actionIcon: { position: 'absolute', bottom: spacing.md, right: spacing.md },
+  centerBox: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl, gap: spacing.md },
+  errorText: { color: colors.textMuted, fontSize: fontSize.md, textAlign: 'center', paddingHorizontal: spacing.lg },
+  retryText: { color: colors.primary, fontSize: fontSize.md, fontWeight: '600' },
 });

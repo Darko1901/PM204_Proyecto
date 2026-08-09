@@ -5,7 +5,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
 import ScalePressable from '../../components/ScalePressable';
-import { mockCuentas, mockColaCocina, mockMesas } from '../../data/mockData';
+import { createCuenta, addDetalles } from '../../api/operaciones';
 
 export default function ConfirmarPedidoScreen({ route, navigation }) {
   const { cuenta, carrito, usuario } = route.params || {};
@@ -24,9 +24,28 @@ export default function ConfirmarPedidoScreen({ route, navigation }) {
     setItems(prev => prev.map((item, i) => i === idx ? { ...item, nota: text } : item));
   };
 
-  const handleEnviarPedido = () => {
+  const handleEnviarPedido = async () => {
+    if (items.length === 0) return;
     setEnviando(true);
-    setTimeout(() => {
+
+    const detalles = items.map(c => ({
+      producto_id: c.id,
+      cantidad: c.cantidad,
+      observaciones: c.nota.trim() !== '' ? c.nota.trim() : null,
+    }));
+
+    try {
+      // La cuenta ya existe en la BD → agregar detalles.
+      // Solo se considera existente si tiene un id entero real (no un marcador local).
+      const esCuentaExistente = Number.isInteger(cuenta?.id);
+      const cuentaReal = esCuentaExistente
+        ? await addDetalles(cuenta.id, detalles)
+        : await createCuenta({
+            mesa_id: cuenta?.tipo === 'en_mesa' ? (cuenta?.mesa?.id ?? cuenta?.mesa_id) : null,
+            tipo: cuenta?.tipo || 'para_llevar',
+            detalles,
+          });
+
       setEnviando(false);
       Alert.alert(
         'Pedido Enviado',
@@ -35,77 +54,26 @@ export default function ConfirmarPedidoScreen({ route, navigation }) {
           {
             text: 'Aceptar',
             onPress: () => {
-              const nuevosDetalles = [
-                ...(cuenta.detalles || []),
-                ...items.map((c, i) => ({
-                  id: (cuenta.detalles?.length || 0) + i + 1,
-                  producto: { nombre: c.nombre },
-                  cantidad: c.cantidad,
-                  precio_unitario: c.precio,
-                  estado: 'pendiente',
-                  observaciones: c.nota.trim() !== '' ? c.nota.trim() : null,
-                }))
-              ];
-              const cuentaActualizada = {
-                ...cuenta,
-                detalles: nuevosDetalles,
-                total: (cuenta.total || 0) + totalCarrito
-              };
-
-              // Actualizar o insertar cuenta en el mock de cuentas
-              const cuentaIdx = mockCuentas.findIndex(c => c.id === cuenta.id);
-              if (cuentaIdx !== -1) {
-                mockCuentas[cuentaIdx] = cuentaActualizada;
-              } else {
-                mockCuentas.push(cuentaActualizada);
-              }
-
-              // Ocupar mesa si aplica
-              if (cuenta.tipo === 'en_mesa' && cuenta.mesa) {
-                const mesaObj = mockMesas.find(m => m.id === cuenta.mesa.id);
-                if (mesaObj) {
-                  mesaObj.ocupada = true;
-                }
-              }
-
-              // Agregar items a la cola de cocina
-              items.forEach((c, idx) => {
-                mockColaCocina.push({
-                  id: Date.now() + idx,
-                  cuenta_id: cuenta.id,
-                  cuenta: {
-                    mesa: cuenta.mesa ? { numero: cuenta.mesa.numero } : null,
-                    tipo: cuenta.tipo,
-                  },
-                  producto: {
-                    nombre: c.nombre,
-                    categoria: c.categoria || 'Bebidas Calientes',
-                  },
-                  cantidad: c.cantidad,
-                  precio_unitario: c.precio,
-                  estado: 'pendiente',
-                  observaciones: c.nota.trim() !== '' ? c.nota.trim() : null,
-                  creado_en: new Date().toISOString(),
-                });
-              });
-              
               navigation.reset({
                 index: 1,
                 routes: [
                   { name: 'Home', params: { usuario } },
-                  { name: 'DetalleCuenta', params: { cuenta: cuentaActualizada, usuario } },
+                  { name: 'DetalleCuenta', params: { cuenta: cuentaReal, usuario } },
                 ],
               });
-            }
-          }
-        ]
+            },
+          },
+        ],
       );
-    }, 1000);
+    } catch (e) {
+      setEnviando(false);
+      Alert.alert('Error', e?.message || 'No se pudo enviar el pedido.');
+    }
   };
 
   const getMesaLabel = () => {
     if (cuenta?.tipo === 'en_mesa') {
-      return `Mesa ${cuenta.mesa?.numero ?? '?'}`;
+      return `Mesa ${cuenta.mesa?.numero ?? cuenta.mesa_numero ?? '?'}`;
     }
     return 'Para Llevar';
   };
@@ -157,11 +125,11 @@ export default function ConfirmarPedidoScreen({ route, navigation }) {
               </View>
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>Mesero:</Text>
-                <Text style={styles.metaVal}>{usuario?.nombre_completo ?? 'Empleado'}</Text>
+                <Text style={styles.metaVal} numberOfLines={1} ellipsizeMode="tail">{usuario?.nombre_completo ?? 'Empleado'}</Text>
               </View>
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>Destino:</Text>
-                <Text style={styles.metaValHighlight}>{getMesaLabel()}</Text>
+                <Text style={styles.metaValHighlight} numberOfLines={1} ellipsizeMode="tail">{getMesaLabel()}</Text>
               </View>
             </View>
 
@@ -179,7 +147,7 @@ export default function ConfirmarPedidoScreen({ route, navigation }) {
               <View key={idx} style={styles.itemContainer}>
                 <View style={styles.itemRow}>
                   <Text style={[styles.itemCant, styles.colCant]}>{item.cantidad}x</Text>
-                  <Text style={[styles.itemProd, styles.colProd]} numberOfLines={1}>{item.nombre}</Text>
+                  <Text style={[styles.itemProd, styles.colProd]} numberOfLines={2}>{item.nombre}</Text>
                   <Text style={[styles.itemTotal, styles.colTotal]}>
                     ${(item.precio * item.cantidad).toFixed(2)}
                   </Text>
@@ -188,7 +156,7 @@ export default function ConfirmarPedidoScreen({ route, navigation }) {
                 <View style={styles.noteInputRow}>
                   <Ionicons name="chatbubble-ellipses-outline" size={13} color="#7A6C5E" />
                   <TextInput
-                    placeholder="Instrucciones (ej. sin azúcar, hielo...)"
+                    placeholder="Instrucciones (ej. sin azúcar, hielo)"
                     placeholderTextColor="#A59585"
                     value={item.nota}
                     onChangeText={(text) => handleUpdateNota(idx, text)}
@@ -308,15 +276,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   metaLabel: {
+    flexShrink: 0,
+    marginRight: spacing.sm,
     fontSize: 12,
     color: '#7A6C5E',
   },
   metaVal: {
+    flex: 1,
+    minWidth: 0,
+    textAlign: 'right',
     fontSize: 12,
     color: '#1A0F0A',
     fontWeight: '500',
   },
   metaValHighlight: {
+    flex: 1,
+    minWidth: 0,
+    textAlign: 'right',
     fontSize: 13,
     color: colors.primaryDark,
     fontWeight: '700',
@@ -346,7 +322,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingLeft: 42, // Alinea el campo de texto debajo del nombre del producto
+    paddingLeft: 24, // Alinea el campo de texto debajo del nombre del producto
     marginTop: 2,
     marginBottom: 6,
   },
@@ -398,12 +374,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   totalLabel: {
+    flexShrink: 0,
+    marginRight: spacing.sm,
     fontSize: 14,
     fontWeight: '800',
     color: '#1A0F0A',
     letterSpacing: 0.5,
   },
   totalVal: {
+    flexShrink: 1,
+    textAlign: 'right',
     fontSize: 18,
     fontWeight: '800',
     color: '#1A0F0A',

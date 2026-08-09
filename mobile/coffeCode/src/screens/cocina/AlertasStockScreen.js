@@ -1,15 +1,33 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
-import { mockSuministros } from '../../data/mockData';
+import { getSuministros } from '../../api/suministros';
 
 export default function AlertasStockScreen({ navigation }) {
   const isFocused = useIsFocused();
-  const alertas = mockSuministros.filter(s => s.activo && s.stock_actual < s.stock_minimo);
+  const [suministros, setSuministros] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    try {
+      setSuministros(await getSuministros());
+    } catch (e) {
+      setSuministros([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isFocused) cargar();
+  }, [isFocused, cargar]);
+
+  const alertas = suministros.filter(s => s.activo && s.stock_actual < s.stock_minimo);
 
   const deficit = (s) => (s.stock_minimo - s.stock_actual).toFixed(2);
   const urgencia = (s) => {
@@ -28,7 +46,7 @@ export default function AlertasStockScreen({ navigation }) {
         </View>
         <View style={styles.cardContent}>
           <View style={styles.cardTop}>
-            <Text style={styles.nombre}>{item.nombre}</Text>
+            <Text style={styles.nombre} numberOfLines={2} ellipsizeMode="tail">{item.nombre}</Text>
             <View style={[styles.urgBadge, { backgroundColor: urg.color + '22' }]}>
               <Text style={[styles.urgText, { color: urg.color }]}>
                 {urg.nivel.charAt(0).toUpperCase() + urg.nivel.slice(1)}
@@ -37,20 +55,20 @@ export default function AlertasStockScreen({ navigation }) {
           </View>
           <View style={styles.stockRow}>
             <View style={styles.stockCol}>
-              <Text style={[styles.stockNum, { color: urg.color }]}>
+              <Text style={[styles.stockNum, { color: urg.color }]} numberOfLines={1}>
                 {item.stock_actual} {item.unidad}
               </Text>
               <Text style={styles.stockLbl}>Actual</Text>
             </View>
             <Ionicons name="arrow-forward" size={16} color={colors.textMuted} />
             <View style={styles.stockCol}>
-              <Text style={[styles.stockNum, { color: colors.textSecondary }]}>
+              <Text style={[styles.stockNum, { color: colors.textSecondary }]} numberOfLines={1}>
                 {item.stock_minimo} {item.unidad}
               </Text>
               <Text style={styles.stockLbl}>Mínimo</Text>
             </View>
             <View style={[styles.deficitBadge, { backgroundColor: urg.color + '22' }]}>
-              <Text style={[styles.deficitText, { color: urg.color }]}>
+              <Text style={[styles.deficitText, { color: urg.color }]} numberOfLines={1}>
                 −{deficit(item)} {item.unidad}
               </Text>
               <Text style={styles.deficitLbl}>déficit</Text>
@@ -74,7 +92,11 @@ export default function AlertasStockScreen({ navigation }) {
         </View>
       </View>
 
-      {alertas.length === 0 ? (
+      {loading ? (
+        <View style={styles.emptyFull}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : alertas.length === 0 ? (
         <View style={styles.emptyFull}>
           <Ionicons name="checkmark-circle" size={64} color={colors.success} />
           <Text style={styles.emptyTitle}>¡Todo en orden!</Text>
@@ -157,14 +179,15 @@ const styles = StyleSheet.create({
   },
   cardContent: { flex: 1 },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
-  nombre: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
-  urgBadge: { borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 2 },
+  nombre: { flex: 1, flexShrink: 1, marginRight: spacing.sm, fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
+  urgBadge: { flexShrink: 0, borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 2 },
   urgText: { fontSize: fontSize.xs, fontWeight: '700' },
-  stockRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  stockCol: { alignItems: 'center' },
+  stockRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
+  stockCol: { flexShrink: 1, alignItems: 'center' },
   stockNum: { fontSize: fontSize.sm, fontWeight: '700' },
   stockLbl: { fontSize: fontSize.xs, color: colors.textMuted },
   deficitBadge: {
+    flexShrink: 1,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,

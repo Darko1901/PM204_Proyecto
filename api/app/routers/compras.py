@@ -64,7 +64,7 @@ def obtener_compra(
 def registrar_compra(
     body: CompraCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles(roles.ADMIN))
+    current_user: Usuario = Depends(require_roles(roles.ADMIN, roles.CAJA))
 ) -> Compra:
     if not body.detalles:
         raise HTTPException(status_code=400, detail="Debe especificar al menos un detalle de insumo")

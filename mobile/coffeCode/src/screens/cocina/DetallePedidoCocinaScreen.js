@@ -5,62 +5,54 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
 import ScalePressable from '../../components/ScalePressable';
-import { mockColaCocina, mockCuentas } from '../../data/mockData';
+import { changeItemEstado } from '../../api/items';
 
 export default function DetallePedidoCocinaScreen({ route, navigation }) {
   const { pedido, usuario } = route.params || {};
   const [items, setItems] = useState(pedido?.items || []);
   const [loadingItemId, setLoadingItemId] = useState(null);
 
-  const actualizarEstadoItem = (itemId, nuevoEstado) => {
+  const actualizarEstadoItem = async (itemId, nuevoEstado) => {
     setLoadingItemId(itemId);
-    setTimeout(() => {
-      // Actualizar en el mock global en memoria
-      const itemReal = mockColaCocina.find(i => i.id === itemId);
-      if (itemReal) {
-        itemReal.estado = nuevoEstado;
-
-        // Sincronizar estado en mockCuentas
-        const cuentaObj = mockCuentas.find(c => c.id === itemReal.cuenta_id);
-        if (cuentaObj && cuentaObj.detalles) {
-          const det = cuentaObj.detalles.find(d => 
-            d.producto.nombre === itemReal.producto.nombre && 
-            d.estado !== 'entregado'
-          );
-          if (det) {
-            det.estado = nuevoEstado;
-          }
-        }
-      }
-      // Actualizar en el estado local de la pantalla
+    try {
+      await changeItemEstado(itemId, nuevoEstado);
       setItems(prev => prev.map(i => i.id === itemId ? { ...i, estado: nuevoEstado } : i));
+    } catch (err) {
+      Alert.alert('Error', err?.message || 'No se pudo actualizar el estado.');
+    } finally {
       setLoadingItemId(null);
-    }, 600);
+    }
   };
 
   const entregarPedido = () => {
-    items.forEach(item => {
-      const real = mockColaCocina.find(i => i.id === item.id);
-      if (real) {
-        real.estado = 'entregado';
+    const listos = items.filter(i => i.estado === 'listo');
+    const pendientes = items.filter(i => i.estado !== 'listo' && i.estado !== 'entregado');
 
-        // Sincronizar estado en mockCuentas
-        const cuentaObj = mockCuentas.find(c => c.id === real.cuenta_id);
-        if (cuentaObj && cuentaObj.detalles) {
-          const det = cuentaObj.detalles.find(d => 
-            d.producto.nombre === real.producto.nombre && 
-            d.estado !== 'entregado'
-          );
-          if (det) {
-            det.estado = 'entregado';
-          }
-        }
-      }
-    });
+    const aviso = pendientes.length > 0
+      ? `Se entregarán ${listos.length} de ${items.length} productos; hay ${pendientes.length} aún en preparación.`
+      : 'Todos los productos de la orden han sido marcados como entregados.';
+
     Alert.alert(
-      'Pedido Entregado',
-      'Todos los productos de la orden han sido marcados como entregados.',
-      [{ text: 'Aceptar', onPress: () => navigation.goBack() }]
+      'Marcar como Entregado',
+      aviso,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Entregar',
+          onPress: async () => {
+            setLoadingItemId('todos');
+            try {
+              await Promise.all(listos.map(i => changeItemEstado(i.id, 'entregado')));
+              setItems(prev => prev.map(i => i.estado === 'listo' ? { ...i, estado: 'entregado' } : i));
+              Alert.alert('Pedido Entregado', aviso, [{ text: 'Aceptar', onPress: () => navigation.goBack() }]);
+            } catch (err) {
+              Alert.alert('Error', err?.message || 'No se pudo entregar el pedido.');
+            } finally {
+              setLoadingItemId(null);
+            }
+          },
+        },
+      ]
     );
   };
 
@@ -138,7 +130,9 @@ export default function DetallePedidoCocinaScreen({ route, navigation }) {
                     <Text style={styles.itemCant}>{item.cantidad}x</Text>
                     <View style={styles.itemMeta}>
                       <Text style={styles.itemName}>{item.producto.nombre}</Text>
-                      <Text style={styles.itemCat}>{item.producto.categoria}</Text>
+                      {item.producto.categoria ? (
+                        <Text style={styles.itemCat}>{item.producto.categoria}</Text>
+                      ) : null}
                     </View>
                   </View>
 
@@ -215,9 +209,16 @@ export default function DetallePedidoCocinaScreen({ route, navigation }) {
         <ScalePressable
           style={styles.btnListoTodo}
           onPress={entregarPedido}
+          disabled={loadingItemId !== null}
         >
-          <Ionicons name="paper-plane" size={20} color={colors.bg} style={{ marginRight: 8 }} />
-          <Text style={styles.btnListoTodoText}>Marcar pedido como Entregado</Text>
+          {loadingItemId === 'todos' ? (
+            <ActivityIndicator color={colors.bg} />
+          ) : (
+            <>
+              <Ionicons name="paper-plane" size={20} color={colors.bg} style={{ marginRight: 8 }} />
+              <Text style={styles.btnListoTodoText}>Marcar para entrega</Text>
+            </>
+          )}
         </ScalePressable>
       </ScrollView>
     </View>

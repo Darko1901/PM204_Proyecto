@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
-import { mockCuentas } from '../../data/mockData';
+import { getCuentas } from '../../api/operaciones';
 
 const ESTADO_COLORS = {
   abierta: colors.success,
@@ -24,8 +24,25 @@ const ESTADO_LABELS = {
 export default function MisCuentasScreen({ route, navigation }) {
   const { usuario } = route.params || {};
   const isFocused = useIsFocused();
+  const [cuentas, setCuentas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const cuentas = mockCuentas;
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      setCuentas(await getCuentas());
+    } catch (e) {
+      setError(e?.message || 'No se pudieron cargar las cuentas.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isFocused) cargar();
+  }, [isFocused, cargar]);
 
   const renderCuenta = ({ item }) => {
     const estadoColor = ESTADO_COLORS[item.estado] || colors.textMuted;
@@ -52,7 +69,7 @@ export default function MisCuentasScreen({ route, navigation }) {
                 color={colors.primary}
               />
               <Text style={styles.cardNombre}>
-                {item.tipo === 'en_mesa' ? `Mesa ${item.mesa?.numero}` : 'Para Llevar'}
+                {item.tipo === 'en_mesa' ? `Mesa ${item.mesa_numero ?? item.mesa?.numero}` : 'Para Llevar'}
               </Text>
             </View>
             <View style={[styles.estadoBadge, { backgroundColor: estadoColor + '22' }]}>
@@ -82,7 +99,7 @@ export default function MisCuentasScreen({ route, navigation }) {
 
           {/* Preview ítems */}
           <Text style={styles.previewText} numberOfLines={1}>
-            {item.detalles.map(d => `${d.producto.nombre} ×${d.cantidad}`).join(' · ')}
+            {item.detalles.map(d => `${d.producto_nombre || d.producto?.nombre} ×${d.cantidad}`).join(' · ')}
           </Text>
         </View>
 
@@ -117,12 +134,27 @@ export default function MisCuentasScreen({ route, navigation }) {
         })}
       </View>
 
+      {loading && cuentas.length === 0 ? (
+        <View style={styles.centro}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : error ? (
+        <View style={styles.centro}>
+          <Ionicons name="cloud-offline-outline" size={40} color={colors.textMuted} />
+          <Text style={styles.emptyText}>{error}</Text>
+          <TouchableOpacity onPress={cargar}>
+            <Text style={{ color: colors.primary, fontWeight: '600' }}>Reintentar</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
       <FlatList
         data={cuentas}
         keyExtractor={item => String(item.id)}
         renderItem={renderCuenta}
         contentContainerStyle={styles.lista}
         showsVerticalScrollIndicator={false}
+        onRefresh={cargar}
+        refreshing={loading}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="receipt-outline" size={48} color={colors.textMuted} />
@@ -130,6 +162,7 @@ export default function MisCuentasScreen({ route, navigation }) {
           </View>
         }
       />
+      )}
     </View>
   );
 }
@@ -185,4 +218,5 @@ const styles = StyleSheet.create({
   previewText: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
   empty: { alignItems: 'center', paddingVertical: spacing.xxl, gap: spacing.md },
   emptyText: { color: colors.textMuted, fontSize: fontSize.md },
+  centro: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.lg },
 });

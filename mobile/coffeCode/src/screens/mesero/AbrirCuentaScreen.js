@@ -5,16 +5,21 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
+import { createCuenta } from '../../api/operaciones';
 
 export default function AbrirCuentaScreen({ route, navigation }) {
   const { mesa, usuario } = route.params;
   const [tipo, setTipo] = useState('en_mesa');
   const [loading, setLoading] = useState(false);
 
-  const handleAbrir = () => {
+  const handleAbrir = async () => {
     setLoading(true);
-    // Simula POST /cuentas
-    setTimeout(() => {
+    try {
+      const cuenta = await createCuenta({
+        mesa_id: tipo === 'en_mesa' ? mesa?.id : null,
+        tipo,
+        detalles: [],
+      });
       setLoading(false);
       Alert.alert(
         'Cuenta abierta',
@@ -22,14 +27,14 @@ export default function AbrirCuentaScreen({ route, navigation }) {
         [
           {
             text: 'Agregar productos',
-            onPress: () => navigation.navigate('Menu', {
-              cuenta: { id: Date.now(), mesa, tipo, estado: 'abierta', total: 0, detalles: [], mesero_id: usuario?.id },
-              usuario,
-            }),
+            onPress: () => navigation.navigate('Menu', { cuenta, usuario }),
           },
         ],
       );
-    }, 800);
+    } catch (e) {
+      setLoading(false);
+      Alert.alert('Error', e?.message || 'No se pudo abrir la cuenta.');
+    }
   };
 
   return (

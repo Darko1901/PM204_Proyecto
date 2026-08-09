@@ -5,7 +5,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
-import { mockColaCocina, mockCuentas } from '../../data/mockData';
+import { getColaCocina, changeItemEstado } from '../../api/items';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -21,14 +21,24 @@ const ESTADO_CONFIG = {
 
 export default function ColaPedidosScreen({ route, navigation }) {
   const isFocused = useIsFocused();
-  const [items, setItems] = useState(mockColaCocina);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState('todos');
   const [loadingId, setLoadingId] = useState(null);
 
-  useEffect(() => {
-    if (isFocused) {
-      setItems([...mockColaCocina]);
+  const cargar = async () => {
+    setLoading(true);
+    try {
+      setItems(await getColaCocina());
+    } catch (e) {
+      setItems([]);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    if (isFocused) cargar();
   }, [isFocused]);
 
   const itemsFiltrados = filtro === 'todos'
@@ -48,36 +58,19 @@ export default function ColaPedidosScreen({ route, navigation }) {
         { text: 'Cancelar', style: 'cancel' },
         {
           text: 'Confirmar',
-          onPress: () => {
+          onPress: async () => {
             setLoadingId(item.id);
-            setTimeout(() => {
+            try {
+              await changeItemEstado(item.id, sig);
               LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-              
-              // Actualizar estado local
               setItems(prev =>
                 prev.map(i => i.id === item.id ? { ...i, estado: sig } : i)
               );
-
-              // 1. Actualizar global mockColaCocina
-              const realCocinaItem = mockColaCocina.find(i => i.id === item.id);
-              if (realCocinaItem) {
-                realCocinaItem.estado = sig;
-              }
-
-              // 2. Actualizar en mockCuentas el detalle del producto correspondientemente
-              const cuentaObj = mockCuentas.find(c => c.id === item.cuenta_id);
-              if (cuentaObj && cuentaObj.detalles) {
-                const det = cuentaObj.detalles.find(d => 
-                  d.producto.nombre === item.producto.nombre && 
-                  (sig === 'en_preparacion' ? d.estado === 'pendiente' : d.estado === 'en_preparacion' || d.estado === 'pendiente')
-                );
-                if (det) {
-                  det.estado = sig;
-                }
-              }
-
+            } catch (err) {
+              Alert.alert('Error', err?.message || 'No se pudo actualizar el estado.');
+            } finally {
               setLoadingId(null);
-            }, 600);
+            }
           },
         },
       ],
@@ -104,9 +97,11 @@ export default function ColaPedidosScreen({ route, navigation }) {
 
         <View style={styles.cardBody}>
           <View style={styles.cardTop}>
-            <View>
-              <Text style={styles.productoNombre}>{item.producto.nombre}</Text>
-              <Text style={styles.productoCategoria}>{item.producto.categoria}</Text>
+            <View style={styles.cardTopLeft}>
+              <Text style={styles.productoNombre} numberOfLines={2} ellipsizeMode="tail">{item.producto.nombre}</Text>
+              {item.producto.categoria ? (
+                <Text style={styles.productoCategoria} numberOfLines={1} ellipsizeMode="tail">{item.producto.categoria}</Text>
+              ) : null}
             </View>
             <View style={styles.cantidadBadge}>
               <Text style={styles.cantidadNum}>×{item.cantidad}</Text>
@@ -211,12 +206,19 @@ export default function ColaPedidosScreen({ route, navigation }) {
         ))}
       </View>
 
+      {loading ? (
+        <View style={styles.empty}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : (
       <FlatList
         data={itemsFiltrados}
         keyExtractor={item => String(item.id)}
         renderItem={renderItem}
         contentContainerStyle={styles.lista}
         showsVerticalScrollIndicator={false}
+        onRefresh={cargar}
+        refreshing={loading}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="checkmark-circle" size={48} color={colors.success} />
@@ -224,6 +226,7 @@ export default function ColaPedidosScreen({ route, navigation }) {
           </View>
         }
       />
+      )}
     </View>
   );
 }
@@ -303,9 +306,11 @@ const styles = StyleSheet.create({
   estadoFranjaText: { fontSize: fontSize.xs, color: colors.bg, fontWeight: '700' },
   cardBody: { padding: spacing.md },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.sm },
+  cardTopLeft: { flex: 1, marginRight: spacing.sm },
   productoNombre: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
   productoCategoria: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
   cantidadBadge: {
+    flexShrink: 0,
     backgroundColor: colors.primary,
     borderRadius: radius.md,
     paddingHorizontal: spacing.sm,

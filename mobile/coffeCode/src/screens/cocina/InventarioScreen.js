@@ -1,18 +1,36 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
-import { mockSuministros } from '../../data/mockData';
+import { getSuministros } from '../../api/suministros';
 import ScalePressable from '../../components/ScalePressable';
 
 export default function InventarioScreen({ route, navigation }) {
   const { usuario } = route.params || {};
   const isFocused = useIsFocused();
   const [busqueda, setBusqueda] = useState('');
-  const suministros = mockSuministros.filter(s =>
+  const [suministros, setSuministros] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    try {
+      setSuministros(await getSuministros());
+    } catch (e) {
+      setSuministros([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isFocused) cargar();
+  }, [isFocused, cargar]);
+
+  const suministrosFiltrados = suministros.filter(s =>
     s.activo && s.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
 
@@ -55,14 +73,14 @@ export default function InventarioScreen({ route, navigation }) {
 
         <View style={styles.stockRow}>
           <View style={styles.stockItem}>
-            <Text style={[styles.stockNum, { color: status.color }]}>
+            <Text style={[styles.stockNum, { color: status.color }]} numberOfLines={1}>
               {item.stock_actual} {item.unidad}
             </Text>
             <Text style={styles.stockLbl}>Actual</Text>
           </View>
           <Ionicons name="remove" size={14} color={colors.textMuted} />
           <View style={styles.stockItem}>
-            <Text style={[styles.stockNum, { color: colors.textMuted }]}>
+            <Text style={[styles.stockNum, { color: colors.textMuted }]} numberOfLines={1}>
               {item.stock_minimo} {item.unidad}
             </Text>
             <Text style={styles.stockLbl}>Mínimo</Text>
@@ -72,8 +90,8 @@ export default function InventarioScreen({ route, navigation }) {
     );
   };
 
-  const agotados = suministros.filter(s => s.stock_actual <= 0).length;
-  const bajos = suministros.filter(s => s.stock_actual > 0 && s.stock_actual < s.stock_minimo).length;
+  const agotados = suministrosFiltrados.filter(s => s.stock_actual <= 0).length;
+  const bajos = suministrosFiltrados.filter(s => s.stock_actual > 0 && s.stock_actual < s.stock_minimo).length;
 
   return (
     <View style={styles.root}>
@@ -112,19 +130,27 @@ export default function InventarioScreen({ route, navigation }) {
         />
       </View>
 
+      {loading ? (
+        <View style={styles.empty}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : (
       <FlatList
-        data={suministros}
+        data={suministrosFiltrados}
         keyExtractor={item => String(item.id)}
         renderItem={renderSuministro}
         contentContainerStyle={styles.lista}
         showsVerticalScrollIndicator={false}
+        onRefresh={cargar}
+        refreshing={loading}
       />
+      )}
 
       {/* Barra de Navegación Inferior para Cocina */}
       <View style={styles.bottomBar}>
         <ScalePressable
           style={styles.bottomBarTab}
-          onPress={() => navigation.navigate('Home', { usuario })}
+          onPress={() => navigation.popToTop()}
         >
           <Ionicons name="list-outline" size={22} color={colors.textSecondary} />
           <Text style={styles.bottomBarTabText}>Pedidos</Text>
@@ -258,8 +284,9 @@ const styles = StyleSheet.create({
     width: 1.5,
     backgroundColor: colors.textMuted + '66',
   },
-  stockRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.md },
-  stockItem: { alignItems: 'center' },
+  stockRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, flexWrap: 'wrap' },
+  stockItem: { flexShrink: 1, alignItems: 'center' },
   stockNum: { fontSize: fontSize.md, fontWeight: '700' },
   stockLbl: { fontSize: fontSize.xs, color: colors.textMuted },
+  empty: { alignItems: 'center', paddingVertical: spacing.xxl },
 });

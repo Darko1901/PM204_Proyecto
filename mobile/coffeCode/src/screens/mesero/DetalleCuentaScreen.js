@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, ScrollView,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
-import { mockCuentas } from '../../data/mockData';
+import { getCuenta, getCuentas, cerrarCuenta } from '../../api/operaciones';
+import { changeItemEstado } from '../../api/items';
+
+const ESTADOS_ACTIVOS = ['abierta', 'por_cobrar'];
 
 const ESTADO_COCINA_COLORS = {
   pendiente: colors.textMuted,
@@ -23,37 +26,55 @@ const ESTADO_COCINA_LABELS = {
 };
 
 export default function DetalleCuentaScreen({ route, navigation }) {
-  const { cuenta: cuentaParam, carrito: carritoParam, usuario } = route.params || {};
+  const { cuenta: cuentaParam, carrito: carritoParam, cuentaId, usuario } = route.params || {};
+  const [cuenta, setCuenta] = useState(cuentaParam?.id ? cuentaParam : null);
+  const [loading, setLoading] = useState(!cuenta);
+  const [enviando, setEnviando] = useState(false);
 
-  // Usar cuenta mock o la construida desde el carrito o buscar por mesa
-  const cuenta = cuentaParam?.detalles
-    ? cuentaParam
-    : route.params?.mesa
-      ? (mockCuentas.find(c => c.mesa_id === route.params.mesa.id) || {
-          id: 1000 + route.params.mesa.id,
-          mesa_id: route.params.mesa.id,
-          mesa: { numero: route.params.mesa.numero },
-          mesero_id: usuario?.id || 1,
-          tipo: 'en_mesa',
-          estado: 'abierta',
-          total: 0,
-          detalles: [],
-          abierta_en: new Date().toISOString(),
-        })
-      : mockCuentas[0];
+  useEffect(() => {
+    if (cuentaId && (!cuenta || cuenta.id !== cuentaId)) {
+      (async () => {
+        try {
+          setCuenta(await getCuenta(cuentaId));
+        } catch {
+          // Se ignora: la pantalla muestra el estado vacío.
+        } finally {
+          setLoading(false);
+        }
+      })();
+    } else if (!cuenta && route.params?.mesa?.id) {
+      (async () => {
+        try {
+          const cuentas = await getCuentas();
+          const encontrada = cuentas.find(
+            c => c.mesa_id === route.params.mesa.id && ESTADOS_ACTIVOS.includes(c.estado)
+          );
+          setCuenta(encontrada || null);
+        } catch {
+          // Sin cuenta: estado vacío.
+        } finally {
+          setLoading(false);
+        }
+      })();
+    } else if (cuenta) {
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cuentaId]);
 
   const detalles = carritoParam
     ? carritoParam.map((c, i) => ({
         id: i + 1,
-        producto: { nombre: c.nombre },
+        producto_nombre: c.nombre,
         cantidad: c.cantidad,
         precio_unitario: c.precio,
         estado: 'pendiente',
         observaciones: null,
       }))
-    : cuenta.detalles;
+    : cuenta?.detalles || [];
 
   const total = detalles.reduce((s, d) => s + d.precio_unitario * d.cantidad, 0);
+  const nombreMesero = cuenta?.mesero_nombre || '';
 
   const handleCobrar = () => {
     Alert.alert(
@@ -63,27 +84,45 @@ export default function DetalleCuentaScreen({ route, navigation }) {
         { text: 'Cancelar', style: 'cancel' },
         {
           text: 'Sí, enviar',
-          onPress: () => {
-            // Actualizar estado en mockCuentas
-            const idx = mockCuentas.findIndex(c => c.id === cuenta.id);
-            if (idx !== -1) {
-              mockCuentas[idx].estado = 'por_cobrar';
+          onPress: async () => {
+            setEnviando(true);
+            try {
+              const actualizada = await cerrarCuenta(cuenta.id);
+              setCuenta(actualizada);
+              setEnviando(false);
+              Alert.alert('Enviado a Caja', 'La cuenta fue marcada como "por cobrar".');
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Home', params: { usuario } }],
+              });
+            } catch (e) {
+              setEnviando(false);
+              Alert.alert('Error', e?.message || 'No se pudo enviar a caja.');
             }
-            Alert.alert('Enviado a Caja', 'La cuenta fue marcada como "por cobrar".');
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'Home', params: { usuario } }],
-            });
           },
         },
       ],
     );
   };
 
+  const handleEntregarItem = async (item) => {
+    try {
+      await changeItemEstado(item.id, 'entregado');
+      setCuenta(prev => prev && ({
+        ...prev,
+        detalles: (prev.detalles || []).map(d =>
+          d.id === item.id ? { ...d, estado: 'entregado' } : d
+        ),
+      }));
+    } catch (e) {
+      Alert.alert('Error', e?.message || 'No se pudo marcar como entregado.');
+    }
+  };
+
   const renderDetalle = ({ item }) => (
     <View style={styles.detalleRow}>
       <View style={styles.detalleMain}>
-        <Text style={styles.detalleNombre}>{item.producto.nombre}</Text>
+        <Text style={styles.detalleNombre} numberOfLines={2} ellipsizeMode="tail">{item.producto_nombre || item.producto?.nombre}</Text>
         {item.observaciones && (
           <View style={styles.obsRow}>
             <Ionicons name="chatbubble-outline" size={12} color={colors.textMuted} />
@@ -95,6 +134,15 @@ export default function DetalleCuentaScreen({ route, navigation }) {
             {ESTADO_COCINA_LABELS[item.estado]}
           </Text>
         </View>
+        {!carritoParam && item.estado === 'listo' && (
+          <TouchableOpacity
+            style={styles.btnEntregar}
+            onPress={() => handleEntregarItem(item)}
+          >
+            <Ionicons name="checkmark-circle-outline" size={14} color={colors.success} />
+            <Text style={styles.btnEntregarText}>Marcar entregado</Text>
+          </TouchableOpacity>
+        )}
       </View>
       <View style={styles.detalleRight}>
         <Text style={styles.detalleCantidad}>×{item.cantidad}</Text>
@@ -122,15 +170,17 @@ export default function DetalleCuentaScreen({ route, navigation }) {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>
-            {cuenta.tipo === 'en_mesa' ? `Mesa ${cuenta.mesa?.numero ?? '?'}` : 'Para Llevar'}
+            {cuenta?.tipo === 'en_mesa'
+              ? `Mesa ${cuenta.mesa_numero ?? cuenta.mesa?.numero ?? '?'}`
+              : 'Para Llevar'}
           </Text>
           <View style={[styles.estadoCuentaBadge, {
-            backgroundColor: cuenta.estado === 'abierta' ? colors.success + '22' : colors.warning + '22',
+            backgroundColor: cuenta?.estado === 'abierta' ? colors.success + '22' : colors.warning + '22',
           }]}>
             <Text style={[styles.estadoCuentaText, {
-              color: cuenta.estado === 'abierta' ? colors.success : colors.warning,
+              color: cuenta?.estado === 'abierta' ? colors.success : colors.warning,
             }]}>
-              {cuenta.estado === 'abierta' ? 'Abierta' : 'Por cobrar'}
+              {cuenta?.estado === 'abierta' ? 'Abierta' : 'Por cobrar'}
             </Text>
           </View>
         </View>
@@ -139,6 +189,17 @@ export default function DetalleCuentaScreen({ route, navigation }) {
         </TouchableOpacity>
       </View>
 
+      {loading ? (
+        <View style={styles.centro}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : !cuenta ? (
+        <View style={styles.centro}>
+          <Ionicons name="receipt-outline" size={40} color={colors.textMuted} />
+          <Text style={styles.emptyText}>No hay cuenta activa en esta mesa</Text>
+        </View>
+      ) : (
+      <>
       {/* Lista */}
       <FlatList
         data={detalles}
@@ -173,13 +234,20 @@ export default function DetalleCuentaScreen({ route, navigation }) {
       />
 
       {/* Footer acciones */}
-      {detalles.length > 0 && cuenta.estado === 'abierta' && (
+      {detalles.length > 0 && cuenta?.estado === 'abierta' && (
         <View style={styles.footer}>
-          <TouchableOpacity style={styles.btnCobrar} onPress={handleCobrar}>
-            <Ionicons name="cash-outline" size={18} color={colors.bg} />
-            <Text style={styles.btnCobrarText}>Solicitar Cobro — ${total.toFixed(2)}</Text>
+          <TouchableOpacity style={styles.btnCobrar} onPress={handleCobrar} disabled={enviando}>
+            {enviando
+              ? <ActivityIndicator color={colors.bg} />
+              : <>
+                  <Ionicons name="cash-outline" size={18} color={colors.bg} />
+                  <Text style={styles.btnCobrarText}>Solicitar Cobro — ${total.toFixed(2)}</Text>
+                </>
+            }
           </TouchableOpacity>
         </View>
+      )}
+      </>
       )}
     </View>
   );
@@ -209,9 +277,22 @@ const styles = StyleSheet.create({
   detalleMain: { flex: 1, marginRight: spacing.md },
   detalleNombre: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary, marginBottom: 4 },
   obsRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: spacing.xs },
-  detalleObs: { fontSize: fontSize.xs, color: colors.textMuted, flex: 1 },
+  detalleObs: { fontSize: fontSize.xs, color: colors.textMuted, flex: 1, flexShrink: 1 },
   estadoBadge: { borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 2, alignSelf: 'flex-start' },
   estadoText: { fontSize: fontSize.xs, fontWeight: '600' },
+  btnEntregar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: colors.success,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    marginTop: spacing.xs,
+  },
+  btnEntregarText: { fontSize: fontSize.xs, fontWeight: '600', color: colors.success },
   detalleRight: { alignItems: 'flex-end' },
   detalleCantidad: { fontSize: fontSize.sm, color: colors.textMuted, marginBottom: 2 },
   detallePrecio: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
@@ -226,14 +307,15 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
-  totalLabel: { color: colors.textSecondary, fontSize: fontSize.sm },
-  totalValor: { color: colors.textPrimary, fontSize: fontSize.sm, fontWeight: '600' },
+  totalLabel: { flexShrink: 1, marginRight: spacing.sm, color: colors.textSecondary, fontSize: fontSize.sm },
+  totalValor: { flexShrink: 0, textAlign: 'right', color: colors.textPrimary, fontSize: fontSize.sm, fontWeight: '600' },
   totalDivider: { height: 1, backgroundColor: colors.border, marginBottom: spacing.sm },
-  totalLabelBig: { color: colors.textPrimary, fontSize: fontSize.lg, fontWeight: '700' },
-  totalValorBig: { color: colors.primary, fontSize: fontSize.xl, fontWeight: '700' },
+  totalLabelBig: { flexShrink: 0, color: colors.textPrimary, fontSize: fontSize.lg, fontWeight: '700' },
+  totalValorBig: { flexShrink: 1, textAlign: 'right', color: colors.primary, fontSize: fontSize.xl, fontWeight: '700' },
   empty: { alignItems: 'center', paddingVertical: spacing.xxl },
   emptyText: { color: colors.textMuted, fontSize: fontSize.md, marginBottom: spacing.sm },
   emptyLink: { color: colors.primary, fontSize: fontSize.md, fontWeight: '600' },
+  centro: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   footer: {
     position: 'absolute',
     bottom: 0, left: 0, right: 0,
@@ -251,5 +333,11 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingVertical: spacing.md,
   },
-  btnCobrarText: { color: colors.bg, fontWeight: '700', fontSize: fontSize.md },
+  btnCobrarText: {
+    flexShrink: 1,
+    textAlign: 'center',
+    color: colors.bg,
+    fontWeight: '700',
+    fontSize: fontSize.md,
+  },
 });

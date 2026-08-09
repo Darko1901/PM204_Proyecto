@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView,
+  View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
 import ScalePressable from '../../components/ScalePressable';
-import { mockMesas, mockColaCocina, mockCuentas } from '../../data/mockData';
+import { getMesas, getCuentas } from '../../api/operaciones';
+import { getColaCocina } from '../../api/items';
+import { useAuth } from '../../context/AuthContext';
 
 const ROL_CONFIG = {
   mesero: {
@@ -72,13 +74,40 @@ const ESTADO_ITEMS_LABELS = {
 };
 
 export default function HomeScreen({ route, navigation }) {
-  const { usuario } = route.params;
-  const rolNombre = usuario.rol.nombre;
+  const { usuario: usuarioContexto } = useAuth();
+  const usuario = route.params?.usuario || usuarioContexto;
+  const rolNombre = usuario?.rol?.nombre;
   const config = ROL_CONFIG[rolNombre] || ROL_CONFIG.administrador;
   const isFocused = useIsFocused();
 
+  const [mesas, setMesas] = useState([]);
+  const [cuentas, setCuentas] = useState([]);
+  const [colaCocina, setColaCocina] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    try {
+      if (rolNombre === 'mesero' || rolNombre === 'caja') {
+        const [m, c] = await Promise.all([getMesas(), getCuentas()]);
+        setMesas(m);
+        setCuentas(c);
+      } else if (rolNombre === 'cocina') {
+        setColaCocina(await getColaCocina());
+      }
+    } catch (e) {
+      // El home sigue mostrando estado vacío; cada módulo reintenta por su cuenta.
+    } finally {
+      setLoading(false);
+    }
+  }, [rolNombre]);
+
+  useEffect(() => {
+    if (isFocused) cargar();
+  }, [isFocused, cargar]);
+
   // Agrupar pedidos activos por cuenta_id
-  const pedidosActivosRaw = mockColaCocina.filter(i => i.estado !== 'listo' && i.estado !== 'entregado');
+  const pedidosActivosRaw = colaCocina.filter(i => i.estado !== 'listo' && i.estado !== 'entregado');
   const pedidosAgrupados = [];
 
   pedidosActivosRaw.forEach(item => {
@@ -110,9 +139,9 @@ export default function HomeScreen({ route, navigation }) {
 
       {/* Header */}
       <View style={styles.header}>
-        <View>
+        <View style={styles.headerLeft}>
           <Text style={styles.saludo}>{saludo},</Text>
-          <Text style={styles.nombre}>{usuario.nombre_completo.split(' ')[0]}</Text>
+          <Text style={styles.nombre} numberOfLines={1} ellipsizeMode="tail">{usuario.nombre_completo.split(' ')[0]}</Text>
         </View>
         <ScalePressable
           style={styles.perfilBtn}
@@ -138,75 +167,114 @@ export default function HomeScreen({ route, navigation }) {
         {/* Módulo Mesero - Mesas Activas */}
         {rolNombre === 'mesero' && (
           <>
-            <Text style={styles.sectionTitle}>Mesas Activas</Text>
-            {mockMesas.filter(m => m.activa && m.ocupada).length > 0 ? (
-              <View style={styles.pedidosList}>
-                {mockMesas
-                  .filter(m => m.activa && m.ocupada)
-                  .map((item) => {
-                    const cuentaMesa = mockCuentas.find(c => c.mesa_id === item.id && c.estado !== 'pagada' && c.estado !== 'cancelada');
-                    const estadoLabel = cuentaMesa
-                      ? (cuentaMesa.estado === 'por_cobrar' ? 'Por cobrar' : 'Abierta')
-                      : 'Ocupada';
-                    const estadoColor = cuentaMesa
-                      ? (cuentaMesa.estado === 'por_cobrar' ? colors.warning : colors.success)
-                      : colors.danger;
+            <Text style={styles.sectionTitle}>Órdenes Activas</Text>
+            {(() => {
+              const misCuentas = cuentas.filter(c =>
+                (c.estado === 'abierta' || c.estado === 'por_cobrar'));
+              const mesasOcupadas = mesas.filter(m =>
+                misCuentas.some(c => c.mesa_id === m.id));
+              const cuentaDeMesa = (mesaId) => misCuentas.find(c => c.mesa_id === mesaId);
+              const cuentaParaLlevar = misCuentas.find(c => c.tipo === 'para_llevar');
+              const tieneOrdenes = mesasOcupadas.length > 0 || !!cuentaParaLlevar;
 
+              const renderDetalles = (detalles) => (detalles && detalles.length > 0) ? (
+                <View style={styles.pedidoItemsList}>
+                  {detalles.map((d, i) => {
+                    const itemColor = ESTADO_ITEMS_COLORS[d.estado] || colors.textMuted;
+                    const itemLabel = ESTADO_ITEMS_LABELS[d.estado] || d.estado;
                     return (
-                      <ScalePressable
-                        key={item.id}
-                        style={styles.pedidoItemCard}
-                        onPress={() => navigation.navigate('DetalleCuenta', { mesa: item, usuario })}
-                      >
-                        <View style={styles.pedidoHeader}>
-                          <Text style={styles.pedidoTitle}>Mesa {item.numero}</Text>
-                          <View style={[styles.pedidoStatusBadge, { backgroundColor: estadoColor + '22' }]}>
-                            <Text style={[styles.pedidoStatusText, { color: estadoColor }]}>
-                              {estadoLabel}
+                      <View key={d.id || i} style={styles.pedidoItemRow}>
+                        <Text style={styles.pedidoItemBullet}>•</Text>
+                        <View style={[styles.pedidoItemContent, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+                          <Text style={styles.pedidoItemText} numberOfLines={1} ellipsizeMode="tail">
+                            {d.cantidad}x {d.producto_nombre || d.producto?.nombre}
+                          </Text>
+                          <View style={[styles.estadoItemBadge, { backgroundColor: itemColor + '15' }]}>
+                            <Text style={[styles.estadoItemText, { color: itemColor }]}>
+                              {itemLabel}
                             </Text>
                           </View>
                         </View>
-
-                        <View style={styles.pedidoDivider} />
-
-                        {cuentaMesa && cuentaMesa.detalles && cuentaMesa.detalles.length > 0 ? (
-                          <View style={styles.pedidoItemsList}>
-                            {cuentaMesa.detalles.map((d, i) => {
-                              const itemColor = ESTADO_ITEMS_COLORS[d.estado] || colors.textMuted;
-                              const itemLabel = ESTADO_ITEMS_LABELS[d.estado] || d.estado;
-                              return (
-                                <View key={d.id || i} style={styles.pedidoItemRow}>
-                                  <Text style={styles.pedidoItemBullet}>•</Text>
-                                  <View style={[styles.pedidoItemContent, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
-                                    <Text style={styles.pedidoItemText}>
-                                      {d.cantidad}x {d.producto.nombre}
-                                    </Text>
-                                    <View style={[styles.estadoItemBadge, { backgroundColor: itemColor + '15' }]}>
-                                      <Text style={[styles.estadoItemText, { color: itemColor }]}>
-                                        {itemLabel}
-                                      </Text>
-                                    </View>
-                                  </View>
-                                </View>
-                              );
-                            })}
-                          </View>
-                        ) : (
-                          <Text style={{ fontSize: fontSize.xs, color: colors.textMuted, fontStyle: 'italic' }}>
-                            Sin productos asignados
-                          </Text>
-                        )}
-                      </ScalePressable>
+                      </View>
                     );
                   })}
-              </View>
-            ) : (
-              <View style={styles.emptyMesasContainer}>
-                <Ionicons name="cafe-outline" size={32} color={colors.textMuted} />
-                <Text style={styles.emptyMesasTitle}>No hay mesas ocupadas</Text>
-                <Text style={styles.emptyMesasSubtitle}>Todas las mesas se encuentran libres.</Text>
-              </View>
-            )}
+                </View>
+              ) : (
+                <Text style={{ fontSize: fontSize.xs, color: colors.textMuted, fontStyle: 'italic' }}>
+                  Sin productos asignados
+                </Text>
+              );
+
+              return tieneOrdenes ? (
+                <View style={styles.pedidosList}>
+                  {cuentaParaLlevar && (
+                    <ScalePressable
+                      key="para_llevar"
+                      style={styles.pedidoItemCard}
+                      onPress={() => navigation.navigate('DetalleCuenta', { cuenta: cuentaParaLlevar, usuario })}
+                    >
+                      <View style={styles.pedidoHeader}>
+                        <Text style={styles.pedidoTitle}>Para Llevar</Text>
+                        <View style={[styles.pedidoStatusBadge, {
+                          backgroundColor: (cuentaParaLlevar.estado === 'por_cobrar' ? colors.warning : colors.success) + '22'
+                        }]}>
+                          <Text style={[styles.pedidoStatusText, {
+                            color: cuentaParaLlevar.estado === 'por_cobrar' ? colors.warning : colors.success
+                          }]}>
+                            {cuentaParaLlevar.estado === 'por_cobrar' ? 'Por cobrar' : 'Abierta'}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.pedidoDivider} />
+                      {renderDetalles(cuentaParaLlevar.detalles)}
+                    </ScalePressable>
+                  )}
+
+                  {mesasOcupadas
+                    .map((item) => {
+                      const cuentaMesa = cuentaDeMesa(item.id);
+                      const estadoLabel = cuentaMesa
+                        ? (cuentaMesa.estado === 'por_cobrar' ? 'Por cobrar' : 'Abierta')
+                        : 'Ocupada';
+                      const estadoColor = cuentaMesa
+                        ? (cuentaMesa.estado === 'por_cobrar' ? colors.warning : colors.success)
+                        : colors.danger;
+
+                      return (
+                        <ScalePressable
+                          key={item.id}
+                          style={styles.pedidoItemCard}
+                          onPress={() => navigation.navigate('DetalleCuenta', { mesa: item, usuario })}
+                        >
+                          <View style={styles.pedidoHeader}>
+                            <Text style={styles.pedidoTitle}>Mesa {item.numero}</Text>
+                            <View style={[styles.pedidoStatusBadge, { backgroundColor: estadoColor + '22' }]}>
+                              <Text style={[styles.pedidoStatusText, { color: estadoColor }]}>
+                                {estadoLabel}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={styles.pedidoDivider} />
+
+                          {renderDetalles(cuentaMesa?.detalles)}
+                        </ScalePressable>
+                      );
+                    })}
+                </View>
+              ) : loading ? (
+                <View style={styles.emptyMesasContainer}>
+                  <ActivityIndicator color={colors.primary} />
+                </View>
+              ) : (
+                <View style={styles.emptyMesasContainer}>
+                  <Ionicons name="cafe-outline" size={32} color={colors.textMuted} />
+                  <Text style={styles.emptyMesasTitle}>No hay órdenes activas</Text>
+                  <Text style={styles.emptyMesasSubtitle}>Las mesas están libres y no hay pedidos para llevar.</Text>
+                </View>
+              );
+            })()}
           </>
         )}
 
@@ -264,6 +332,10 @@ export default function HomeScreen({ route, navigation }) {
                   );
                 })}
               </View>
+            ) : loading ? (
+              <View style={styles.emptyMesasContainer}>
+                <ActivityIndicator color={colors.primary} />
+              </View>
             ) : (
               <View style={styles.emptyMesasContainer}>
                 <Ionicons name="checkmark-circle-outline" size={32} color={colors.success} />
@@ -279,28 +351,33 @@ export default function HomeScreen({ route, navigation }) {
           <>
             <Text style={styles.sectionTitle}>Cuentas por Cobrar</Text>
             
+            {(() => {
+              const porCobrar = cuentas.filter(c => c.estado === 'por_cobrar');
+              const sumaPendiente = porCobrar.reduce((s, c) => s + (Number(c.total) || 0), 0);
+
+              return (
+            <>
             {/* Resumen rápido de caja */}
             <View style={styles.cajaResumenCard}>
               <View style={styles.cajaResumenItem}>
                 <Text style={styles.cajaResumenNum}>
-                  {mockCuentas.filter(c => c.estado === 'por_cobrar').length}
+                  {porCobrar.length}
                 </Text>
                 <Text style={styles.cajaResumenLbl}>Cuentas</Text>
               </View>
               <View style={styles.cajaResumenDivider} />
               <View style={styles.cajaResumenItem}>
-                <Text style={[styles.cajaResumenNum, { color: colors.primary }]}>
-                  ${mockCuentas.filter(c => c.estado === 'por_cobrar').reduce((s, c) => s + c.total, 0).toFixed(2)}
+                <Text style={[styles.cajaResumenNum, { color: colors.primary }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                  ${sumaPendiente.toFixed(2)}
                 </Text>
                 <Text style={styles.cajaResumenLbl}>Total pendiente</Text>
               </View>
             </View>
 
             {/* Listado de cuentas */}
-            {mockCuentas.filter(c => c.estado === 'por_cobrar').length > 0 ? (
+            {porCobrar.length > 0 ? (
               <View style={styles.cajaCuentasList}>
-                {mockCuentas
-                  .filter(c => c.estado === 'por_cobrar')
+                {porCobrar
                   .map((item) => (
                     <TouchableOpacity
                       key={item.id}
@@ -317,7 +394,7 @@ export default function HomeScreen({ route, navigation }) {
                             color={colors.primary}
                           />
                           <Text style={styles.cajaCardTitulo}>
-                            {item.tipo === 'en_mesa' ? `Mesa ${item.mesa?.numero}` : 'Para Llevar'}
+                            {item.tipo === 'en_mesa' ? `Mesa ${item.mesa_numero ?? item.mesa?.numero}` : 'Para Llevar'}
                           </Text>
                         </View>
                         <View style={styles.cajaEsperandoBadge}>
@@ -336,7 +413,7 @@ export default function HomeScreen({ route, navigation }) {
                       <View style={styles.cajaItemsPreview}>
                         {item.detalles.map((d, i) => (
                           <View key={i} style={styles.cajaItemRow}>
-                            <Text style={styles.cajaItemNombre}>{d.producto.nombre}</Text>
+                            <Text style={styles.cajaItemNombre}>{d.producto_nombre || d.producto?.nombre}</Text>
                             <Text style={styles.cajaItemQty}>×{d.cantidad}</Text>
                             <Text style={styles.cajaItemPrecio}>${(d.precio_unitario * d.cantidad).toFixed(2)}</Text>
                           </View>
@@ -360,6 +437,10 @@ export default function HomeScreen({ route, navigation }) {
                     </TouchableOpacity>
                   ))}
               </View>
+            ) : loading ? (
+              <View style={styles.cajaEmptyContainer}>
+                <ActivityIndicator color={colors.primary} />
+              </View>
             ) : (
               <View style={styles.cajaEmptyContainer}>
                 <Ionicons name="checkmark-circle" size={32} color={colors.success} />
@@ -367,6 +448,9 @@ export default function HomeScreen({ route, navigation }) {
                 <Text style={styles.cajaEmptySubtitle}>No hay cuentas pendientes de pago.</Text>
               </View>
             )}
+            </>
+              );
+            })()}
           </>
         )}
 
@@ -475,8 +559,9 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xl + spacing.md,
     paddingBottom: spacing.md,
   },
+  headerLeft: { flex: 1, marginRight: spacing.sm },
   saludo: { fontSize: fontSize.sm, color: colors.textMuted },
-  nombre: { fontSize: fontSize.xl, fontWeight: '700', color: colors.textPrimary },
+  nombre: { flexShrink: 1, fontSize: fontSize.xl, fontWeight: '700', color: colors.textPrimary },
   perfilBtn: { padding: spacing.xs },
   avatarCircle: {
     width: 48,
@@ -713,6 +798,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   pedidoItemText: {
+    flexShrink: 1,
+    marginRight: spacing.xs,
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     fontWeight: '500',
@@ -760,8 +847,8 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.md,
   },
-  cajaResumenItem: { flex: 1, alignItems: 'center' },
-  cajaResumenNum: { fontSize: fontSize.xxl, fontWeight: '700', color: colors.textPrimary },
+  cajaResumenItem: { flex: 1, flexShrink: 1, alignItems: 'center' },
+  cajaResumenNum: { flexShrink: 1, fontSize: fontSize.xxl, fontWeight: '700', color: colors.textPrimary },
   cajaResumenLbl: { fontSize: fontSize.xs, color: colors.textMuted },
   cajaResumenDivider: { width: 1, backgroundColor: colors.border, marginVertical: spacing.xs },
   cajaCuentasList: { gap: spacing.md, marginBottom: spacing.lg },

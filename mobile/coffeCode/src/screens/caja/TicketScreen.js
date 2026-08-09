@@ -69,7 +69,7 @@ export default function TicketScreen({ route, navigation }) {
           {/* Ítems */}
           {ticket.cuenta?.detalles?.map((d, i) => (
             <View key={i} style={styles.itemRow}>
-              <Text style={styles.itemNombre}>{d.producto.nombre}</Text>
+              <Text style={styles.itemNombre}>{d.producto_nombre || d.producto?.nombre}</Text>
               <Text style={styles.itemQty}>×{d.cantidad}</Text>
               <Text style={styles.itemPrecio}>${(d.precio_unitario * d.cantidad).toFixed(2)}</Text>
             </View>
@@ -140,7 +140,7 @@ export default function TicketScreen({ route, navigation }) {
 
         <TouchableOpacity
           style={styles.finalizarBtn}
-          onPress={() => navigation.navigate('Home', { usuario })}
+          onPress={() => navigation.popToTop()}
         >
           <Ionicons name="checkmark-circle" size={20} color={colors.bg} />
           <Text style={styles.finalizarBtnText}>Finalizar Cobro</Text>
@@ -148,7 +148,7 @@ export default function TicketScreen({ route, navigation }) {
 
         <TouchableOpacity
           style={styles.homeBtn}
-          onPress={() => navigation.navigate('Home', { usuario })}
+          onPress={() => navigation.popToTop()}
         >
           <Ionicons name="home-outline" size={18} color={colors.primary} />
           <Text style={styles.homeBtnText}>Ir al Inicio</Text>
@@ -183,7 +183,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   successTitle: { fontSize: fontSize.xl, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.xs },
-  successSubtitle: { fontSize: fontSize.sm, color: colors.textMuted },
+  successSubtitle: { fontSize: fontSize.sm, color: colors.textMuted, textAlign: 'center' },
   ticketCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radius.lg,
@@ -195,7 +195,7 @@ const styles = StyleSheet.create({
   ticketBrand: { alignItems: 'center', marginBottom: spacing.md },
   ticketBrandRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xs },
   ticketBrandName: { fontSize: fontSize.lg, fontWeight: '700', color: colors.primary },
-  ticketFecha: { fontSize: fontSize.sm, color: colors.textMuted },
+  ticketFecha: { fontSize: fontSize.sm, color: colors.textMuted, textAlign: 'center' },
   dottedLine: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
@@ -203,15 +203,15 @@ const styles = StyleSheet.create({
     marginVertical: spacing.md,
   },
   folioRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  folioLabel: { fontSize: fontSize.sm, color: colors.textMuted },
-  folioNum: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary, letterSpacing: 1 },
+  folioLabel: { flexShrink: 0, fontSize: fontSize.sm, color: colors.textMuted },
+  folioNum: { flexShrink: 1, textAlign: 'right', fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary, letterSpacing: 1 },
   itemRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs },
   itemNombre: { flex: 1, fontSize: fontSize.sm, color: colors.textSecondary },
   itemQty: { fontSize: fontSize.sm, color: colors.textMuted, marginRight: spacing.sm },
   itemPrecio: { fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: '600', minWidth: 60, textAlign: 'right' },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  totalLabel: { fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
-  totalValor: { fontSize: fontSize.xxl, fontWeight: '700', color: colors.primary },
+  totalLabel: { flexShrink: 0, fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
+  totalValor: { flexShrink: 1, textAlign: 'right', fontSize: fontSize.xxl, fontWeight: '700', color: colors.primary },
   efectivoDetalleContainer: {
     marginTop: spacing.sm,
     paddingTop: spacing.xs,
@@ -225,10 +225,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   efectivoDetalleLabel: {
+    flexShrink: 1,
+    marginRight: spacing.sm,
     fontSize: fontSize.sm,
     color: colors.textSecondary,
   },
   efectivoDetalleValor: {
+    flexShrink: 0,
+    textAlign: 'right',
     fontSize: fontSize.sm,
     fontWeight: '600',
     color: colors.textPrimary,

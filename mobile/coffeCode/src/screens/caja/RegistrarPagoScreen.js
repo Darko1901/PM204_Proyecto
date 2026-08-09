@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
-import { mockTickets, mockMesas } from '../../data/mockData';
+import { getTicket, pagarCuenta } from '../../api/operaciones';
 
 const METODOS = [
   { key: 'efectivo', label: 'Efectivo', icon: 'cash-outline' },
@@ -19,47 +19,29 @@ export default function RegistrarPagoScreen({ route, navigation }) {
 
   const esInvalidoEfectivo = metodo === 'efectivo' && (cantidadPagada === '' || parseFloat(cantidadPagada) < cuenta.total);
 
-  const handleCobrar = () => {
+  const handleCobrar = async () => {
     setLoading(true);
-    // Simula POST /pagos + POST /tickets
-    setTimeout(() => {
-      setLoading(false);
-      cuenta.estado = 'pagada'; // Actualiza el estado en mockData para que no aparezca más
-      
-      // Liberar la mesa correspondiente
-      if (cuenta.mesa_id) {
-        const m = mockMesas.find(mesa => mesa.id === cuenta.mesa_id);
-        if (m) {
-          m.ocupada = false;
-        }
-      } else if (cuenta.mesa) {
-        const m = mockMesas.find(mesa => mesa.numero === cuenta.mesa.numero);
-        if (m) {
-          m.ocupada = false;
-        }
-      }
+    try {
+      await pagarCuenta(cuenta.id, metodo);
+      const ticket = await getTicket(cuenta.id);
 
-      // Generar ticket en mockData
-      const ticketObj = {
-        id: mockTickets.length + 1,
-        folio: `TKT-${String(Math.floor(Math.random() * 9000) + 1000)}`,
-        cuenta_id: cuenta.id,
-        total: cuenta.total,
-        emitido_en: new Date().toISOString(),
-      };
-      mockTickets.push(ticketObj);
+      const pagadoCon = metodo === 'efectivo' ? parseFloat(cantidadPagada) : cuenta.total;
+      const cambio = metodo === 'efectivo' ? pagadoCon - cuenta.total : 0;
 
       navigation.replace('Ticket', {
         ticket: {
-          ...ticketObj,
+          ...ticket,
           metodo,
           cuenta,
-          pagadoCon: metodo === 'efectivo' ? parseFloat(cantidadPagada) : cuenta.total,
-          cambio: metodo === 'efectivo' ? parseFloat(cantidadPagada) - cuenta.total : 0,
+          pagadoCon,
+          cambio,
         },
         usuario,
       });
-    }, 1200);
+    } catch (e) {
+      Alert.alert('Error', e?.message || 'No se pudo procesar el cobro.');
+      setLoading(false);
+    }
   };
 
   const getPresets = () => {
@@ -94,12 +76,16 @@ export default function RegistrarPagoScreen({ route, navigation }) {
               color={colors.primary}
             />
             <Text style={styles.cuentaTitulo}>
-              {cuenta.tipo === 'en_mesa' ? `Mesa ${cuenta.mesa?.numero}` : 'Para Llevar'}
+              {cuenta.tipo === 'en_mesa'
+                ? `Mesa ${cuenta.mesa_numero ?? cuenta.mesa?.numero}`
+                : 'Para Llevar'}
             </Text>
           </View>
           {cuenta.detalles.map((d, i) => (
             <View key={i} style={styles.detalleRow}>
-              <Text style={styles.detalleNombre}>{d.producto.nombre} ×{d.cantidad}</Text>
+              <Text style={styles.detalleNombre} numberOfLines={1} ellipsizeMode="tail">
+                {d.producto_nombre || d.producto?.nombre} ×{d.cantidad}
+              </Text>
               <Text style={styles.detallePrecio}>${(d.precio_unitario * d.cantidad).toFixed(2)}</Text>
             </View>
           ))}
@@ -160,7 +146,7 @@ export default function RegistrarPagoScreen({ route, navigation }) {
                   style={styles.presetBtn}
                   onPress={() => setCantidadPagada(val.toFixed(2))}
                 >
-                  <Text style={styles.presetBtnText}>
+                  <Text style={styles.presetBtnText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
                     {val === cuenta.total ? 'Exacto' : `$${val}`}
                   </Text>
                 </TouchableOpacity>
@@ -261,12 +247,12 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   cuentaTitulo: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
-  detalleRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs },
-  detalleNombre: { color: colors.textSecondary, fontSize: fontSize.sm },
-  detallePrecio: { color: colors.textPrimary, fontSize: fontSize.sm, fontWeight: '600' },
+  detalleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.xs },
+  detalleNombre: { flex: 1, flexShrink: 1, marginRight: spacing.sm, color: colors.textSecondary, fontSize: fontSize.sm },
+  detallePrecio: { flexShrink: 0, color: colors.textPrimary, fontSize: fontSize.sm, fontWeight: '600' },
   totalLinea: { height: 1, backgroundColor: colors.border, marginVertical: spacing.sm },
-  totalLabel: { color: colors.textPrimary, fontSize: fontSize.md, fontWeight: '700' },
-  totalValor: { color: colors.primary, fontSize: fontSize.xl, fontWeight: '700' },
+  totalLabel: { flexShrink: 0, color: colors.textPrimary, fontSize: fontSize.md, fontWeight: '700' },
+  totalValor: { flexShrink: 1, textAlign: 'right', color: colors.primary, fontSize: fontSize.xl, fontWeight: '700' },
   sectionTitle: {
     fontSize: fontSize.xs,
     fontWeight: '700',
@@ -362,11 +348,15 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   cambioLabel: {
+    flexShrink: 1,
+    marginRight: spacing.sm,
     fontSize: fontSize.md,
     color: colors.textSecondary,
     fontWeight: '600',
   },
   cambioValor: {
+    flexShrink: 0,
+    textAlign: 'right',
     fontSize: fontSize.xl,
     color: colors.success,
     fontWeight: '700',
@@ -380,8 +370,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   resumenRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing.sm },
-  resumenLabel: { color: colors.textMuted, fontSize: fontSize.sm },
-  resumenValor: { color: colors.textPrimary, fontSize: fontSize.sm, fontWeight: '600' },
+  resumenLabel: { flexShrink: 1, marginRight: spacing.sm, color: colors.textMuted, fontSize: fontSize.sm },
+  resumenValor: { flexShrink: 0, textAlign: 'right', color: colors.textPrimary, fontSize: fontSize.sm, fontWeight: '600' },
   resumenDivider: { height: 1, backgroundColor: colors.border },
   confirmarBtn: {
     backgroundColor: colors.primary,

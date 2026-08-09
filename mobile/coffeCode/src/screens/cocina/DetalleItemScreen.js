@@ -4,17 +4,16 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
-import { mockColaCocina } from '../../data/mockData';
 
 export default function DetalleItemScreen({ route, navigation }) {
-  const { item } = route.params || { item: mockColaCocina[0] };
+  const { item } = route.params || {};
 
   const ESTADO_STEPS = ['pendiente', 'en_preparacion', 'listo', 'entregado'];
-  const stepActual = ESTADO_STEPS.indexOf(item.estado);
+  const stepActual = item ? ESTADO_STEPS.indexOf(item.estado) : -1;
 
   const STEP_LABELS = {
     pendiente: 'Pendiente',
-    en_preparacion: 'En Preparación',
+    en_preparacion: 'Preparación',
     listo: 'Listo',
     entregado: 'Entregado',
   };
@@ -37,7 +36,9 @@ export default function DetalleItemScreen({ route, navigation }) {
             <Ionicons name="fast-food-outline" size={38} color={colors.primary} />
           </View>
           <Text style={styles.heroNombre}>{item.producto.nombre}</Text>
-          <Text style={styles.heroCategoria}>{item.producto.categoria}</Text>
+          {item.producto.categoria ? (
+            <Text style={styles.heroCategoria}>{item.producto.categoria}</Text>
+          ) : null}
           <View style={styles.heroCantidadBadge}>
             <Text style={styles.heroCantidadText}>Cantidad: {item.cantidad}</Text>
           </View>
@@ -47,12 +48,14 @@ export default function DetalleItemScreen({ route, navigation }) {
         <Text style={styles.sectionTitle}>Origen del pedido</Text>
         <View style={styles.infoCard}>
           <View style={styles.infoRow}>
-            <Ionicons name={item.cuenta.tipo === 'en_mesa' ? 'restaurant-outline' : 'bag-outline'}
+            <Ionicons name={item.cuenta?.tipo === 'en_mesa' ? 'restaurant-outline' : 'bag-outline'}
               size={18} color={colors.primary} />
             <View style={styles.infoContent}>
               <Text style={styles.infoLabel}>Mesa / Tipo</Text>
               <Text style={styles.infoValor}>
-                {item.cuenta.tipo === 'en_mesa' ? `Mesa ${item.cuenta.mesa?.numero}` : 'Para Llevar'}
+                {item.cuenta?.tipo === 'en_mesa'
+                  ? `Mesa ${item.cuenta.mesa?.numero ?? item.cuenta.mesa_numero ?? '?'}`
+                  : 'Para Llevar'}
               </Text>
             </View>
           </View>
@@ -93,7 +96,7 @@ export default function DetalleItemScreen({ route, navigation }) {
                   : <Text style={[styles.progresoNum, i <= stepActual && { color: colors.bg }]}>{i + 1}</Text>
                 }
               </View>
-              <Text style={[styles.progresoLabel, i <= stepActual && { color: colors.primary }]}>
+              <Text style={[styles.progresoLabel, i <= stepActual && { color: colors.primary }]} numberOfLines={1} ellipsizeMode="tail">
                 {STEP_LABELS[step]}
               </Text>
               {i < ESTADO_STEPS.length - 1 && (
@@ -201,7 +204,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   progresoNum: { fontSize: fontSize.xs, color: colors.textMuted, fontWeight: '700' },
-  progresoLabel: { fontSize: 9, color: colors.textMuted, textAlign: 'center' },
+  progresoLabel: { fontSize: 9, color: colors.textMuted, textAlign: 'center', paddingHorizontal: 2 },
   progresoLinea: {
     position: 'absolute',
     top: 16,

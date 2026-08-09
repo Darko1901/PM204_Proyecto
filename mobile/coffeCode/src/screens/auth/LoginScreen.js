@@ -2,44 +2,50 @@ import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   StatusBar, KeyboardAvoidingView, Platform, ActivityIndicator,
+  TouchableWithoutFeedback, Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
-import { mockUsuarios } from '../../data/mockData';
 import ScalePressable from '../../components/ScalePressable';
+import { useAuth } from '../../context/AuthContext';
+
+const ACCESOS_DEMO = [
+  { rol: 'mesero', correo: 'mesero@cafeteria.com' },
+  { rol: 'cocina', correo: 'cocina@cafeteria.com' },
+  { rol: 'caja', correo: 'caja@cafeteria.com' },
+];
 
 export default function LoginScreen({ navigation }) {
+  const { signIn } = useAuth();
   const [correo, setCorreo] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setError('');
     if (!correo || !password) {
       setError('Ingresa tu correo y contraseña.');
       return;
     }
     setLoading(true);
-    // Simulación del POST /auth/login
-    setTimeout(() => {
-      const usuario = mockUsuarios.find(u => u.correo === correo.toLowerCase().trim());
-      if (usuario && password === '1234') {
-        setLoading(false);
-        navigation.replace('Home', { usuario });
-      } else {
-        setLoading(false);
-        setError('Credenciales incorrectas. Intenta de nuevo.');
-      }
-    }, 1200);
+    try {
+      const usuario = await signIn(correo.trim().toLowerCase(), password);
+      navigation.replace('Home', { usuario });
+    } catch (e) {
+      setError(e?.message || 'No se pudo iniciar sesión. Verifica tu conexión.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <KeyboardAvoidingView
+        style={styles.root}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       {/* Logo / Branding */}
       <View style={styles.brandArea}>
@@ -64,6 +70,9 @@ export default function LoginScreen({ navigation }) {
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
+          returnKeyType="done"
+          onSubmitEditing={Keyboard.dismiss}
+          blurOnSubmit
         />
 
         <Text style={styles.label}>Contraseña</Text>
@@ -74,6 +83,9 @@ export default function LoginScreen({ navigation }) {
           value={password}
           onChangeText={setPassword}
           secureTextEntry
+          returnKeyType="done"
+          onSubmitEditing={Keyboard.dismiss}
+          blurOnSubmit
         />
 
         {!!error && <Text style={styles.errorText}>{error}</Text>}
@@ -92,22 +104,23 @@ export default function LoginScreen({ navigation }) {
         {/* Accesos rápidos de demo */}
         <Text style={styles.demoTitle}>Acceso rápido (demo)</Text>
         <View style={styles.demoRow}>
-          {['mesero', 'cocina', 'caja'].map(rol => (
+          {ACCESOS_DEMO.map(({ rol, correo: correoDemo }) => (
             <TouchableOpacity
               key={rol}
               style={styles.demoBtn}
               onPress={() => {
-                setCorreo(`${rol}@coffecode.mx`);
-                setPassword('1234');
+                setCorreo(correoDemo);
+                setPassword('cafe2026');
               }}
             >
               <Text style={styles.demoBtnText}>{rol}</Text>
             </TouchableOpacity>
           ))}
         </View>
-        <Text style={styles.demoHint}>Pass: 1234</Text>
+        <Text style={styles.demoHint}>Pass: cafe2026</Text>
       </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </TouchableWithoutFeedback>
   );
 }
 

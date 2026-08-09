@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
-import { mockSuministros, mockCompras } from '../../data/mockData';
+import { getSuministros } from '../../api/suministros';
+import { createCompra } from '../../api/compras';
 
 export default function RegistrarCompraScreen({ route, navigation }) {
   const { usuario } = route.params || {};
@@ -14,8 +15,13 @@ export default function RegistrarCompraScreen({ route, navigation }) {
   const [showSelector, setShowSelector] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busquedaSuministro, setBusquedaSuministro] = useState('');
+  const [suministros, setSuministros] = useState([]);
 
-  const suministrosFiltrados = mockSuministros.filter(s =>
+  useEffect(() => {
+    getSuministros().then(setSuministros).catch(() => setSuministros([]));
+  }, []);
+
+  const suministrosFiltrados = suministros.filter(s =>
     s.activo && s.nombre.toLowerCase().includes(busquedaSuministro.toLowerCase())
   );
 
@@ -44,39 +50,29 @@ export default function RegistrarCompraScreen({ route, navigation }) {
     setLineas(prev => prev.filter(l => l.suministro_id !== id));
   };
 
-  const handleGuardar = () => {
+  const handleGuardar = async () => {
     if (!proveedor.trim()) { Alert.alert('Falta el proveedor'); return; }
     if (lineas.length === 0) { Alert.alert('Agrega al menos un suministro'); return; }
     if (lineas.some(l => l.cantidad <= 0)) { Alert.alert('La cantidad de cada suministro debe ser mayor a 0'); return; }
     if (lineas.some(l => l.costo_unitario <= 0)) { Alert.alert('El costo de cada suministro debe ser mayor a 0'); return; }
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      // Incrementar stock en mockData
-      lineas.forEach(linea => {
-        const sum = mockSuministros.find(s => s.id === linea.suministro_id);
-        if (sum) {
-          sum.stock_actual = parseFloat((sum.stock_actual + linea.cantidad).toFixed(2));
-        }
+    try {
+      await createCompra({
+        proveedor: proveedor.trim(),
+        detalles: lineas.map(l => ({
+          suministro_id: l.suministro_id,
+          cantidad: l.cantidad,
+          costo_unitario: l.costo_unitario,
+        })),
       });
-      
-      // Guardar compra en mockCompras (al principio para que aparezca primero en el historial)
-      mockCompras.unshift({
-        id: mockCompras.length + 1,
-        proveedor: proveedor,
-        total: total,
-        comprado_en: new Date().toISOString(),
-        detalles: lineas.map(linea => ({
-          suministro: { nombre: linea.suministro.nombre },
-          cantidad: linea.cantidad,
-          costo_unitario: linea.costo_unitario
-        }))
-      });
-
       Alert.alert('Compra registrada', `Total: $${total.toFixed(2)}`, [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
-    }, 1000);
+    } catch (e) {
+      Alert.alert('Error', e?.message || 'No se pudo registrar la compra.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -136,8 +132,8 @@ export default function RegistrarCompraScreen({ route, navigation }) {
                     setBusquedaSuministro('');
                   }}
                 >
-                  <Text style={styles.selectorNombre}>{s.nombre}</Text>
-                  <Text style={styles.selectorUnidad}>{s.unidad}</Text>
+                  <Text style={styles.selectorNombre} numberOfLines={1} ellipsizeMode="tail">{s.nombre}</Text>
+                  <Text style={styles.selectorUnidad} numberOfLines={1}>{s.unidad}</Text>
                 </TouchableOpacity>
               ))}
               {suministrosFiltrados.length === 0 && (
@@ -168,7 +164,9 @@ export default function RegistrarCompraScreen({ route, navigation }) {
             </View>
             <View style={styles.lineaInputs}>
               <View style={styles.lineaInputGroup}>
-                <Text style={styles.lineaInputLabel}>Cantidad ({linea.suministro.unidad})</Text>
+                <Text style={styles.lineaInputLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                  Cantidad ({linea.suministro.unidad})
+                </Text>
                 <TextInput
                   style={styles.lineaInput}
                   keyboardType="decimal-pad"
@@ -304,8 +302,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: colors.border,
   },
-  selectorNombre: { fontSize: fontSize.sm, color: colors.textPrimary },
-  selectorUnidad: { fontSize: fontSize.sm, color: colors.textMuted },
+  selectorNombre: { flex: 1, flexShrink: 1, marginRight: spacing.sm, fontSize: fontSize.sm, color: colors.textPrimary },
+  selectorUnidad: { flexShrink: 0, fontSize: fontSize.sm, color: colors.textMuted },
   selectorVacio: {
     fontSize: fontSize.sm,
     color: colors.textMuted,
@@ -323,7 +321,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   lineaHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
-  lineaNombre: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
+  lineaNombre: { flex: 1, flexShrink: 1, marginRight: spacing.sm, fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
   lineaInputs: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
   lineaInputGroup: { flex: 1 },
   lineaInputLabel: { fontSize: fontSize.xs, color: colors.textMuted, marginBottom: spacing.xs },
@@ -352,8 +350,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     marginBottom: spacing.sm,
   },
-  totalLabel: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
-  totalValor: { fontSize: fontSize.xl, fontWeight: '700', color: colors.primary },
+  totalLabel: { flexShrink: 0, fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
+  totalValor: { flexShrink: 1, textAlign: 'right', fontSize: fontSize.xl, fontWeight: '700', color: colors.primary },
   guardarBtn: {
     backgroundColor: colors.primary,
     borderRadius: radius.md,

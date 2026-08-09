@@ -290,13 +290,20 @@ def pagar_cuenta(
     cuenta.estado = EstadoCuenta.pagada
     cuenta.cerrada_en = datetime.now()
     
-    # 4. Descontar insumos de inventario
-    for det in cuenta.detalles:
+    # 4. Descontar insumos de inventario (solo ítems aún no descontados).
+    #    El descuento principal ocurre al marcar 'listo' (routes/items.py).
+    #    Aquí solo se descuentan los ítems que nunca llegaron a 'listo' para
+    #    evitar el doble consumo de inventario al pagar.
+    por_consumir = [
+        det for det in cuenta.detalles
+        if det.estado in (EstadoCocina.pendiente, EstadoCocina.en_preparacion)
+    ]
+    for det in por_consumir:
         # Por cada detalle de cuenta, restar insumos de las recetas
         for rec in det.producto.recetas:
             sumi = rec.suministro
             cant_descontar = rec.cantidad * det.cantidad
-            
+
             # Restar del stock
             sumi.stock_actual = float(sumi.stock_actual) - float(cant_descontar)
             if sumi.stock_actual < 0:

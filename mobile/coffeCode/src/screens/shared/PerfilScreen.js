@@ -3,9 +3,11 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
 import ScalePressable from '../../components/ScalePressable';
+import { useAuth } from '../../context/AuthContext';
 
 export default function PerfilScreen({ route, navigation }) {
-  const { usuario } = route.params;
+  const { usuario: usuarioContexto, signOut } = useAuth();
+  const usuario = route.params?.usuario || usuarioContexto;
 
   const ROL_ICONS = { mesero: 'restaurant-outline', cocina: 'flame-outline', caja: 'cash-outline', administrador: 'settings-outline' };
   const ROL_COLORS = { mesero: '#5B9BD5', cocina: '#F0A500', caja: '#4CAF7D', administrador: colors.primary };
@@ -106,7 +108,7 @@ export default function PerfilScreen({ route, navigation }) {
           <View style={styles.turnoRow}>
             <Ionicons name="person-outline" size={18} color={colors.primary} />
             <Text style={styles.turnoLabel}>Empleado</Text>
-            <Text style={styles.turnoValor}>{usuario.nombre_completo}</Text>
+            <Text style={styles.turnoValor} numberOfLines={2} ellipsizeMode="tail">{usuario.nombre_completo}</Text>
           </View>
           <View style={styles.divider} />
           
@@ -121,7 +123,8 @@ export default function PerfilScreen({ route, navigation }) {
 
         <ScalePressable
           style={styles.logoutBtn}
-          onPress={() => {
+          onPress={async () => {
+            await signOut();
             navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
           }}
         >
@@ -232,8 +235,8 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingVertical: spacing.sm,
   },
-  turnoLabel: { flex: 1, color: colors.textSecondary, fontSize: fontSize.sm },
-  turnoValor: { color: colors.textPrimary, fontSize: fontSize.sm, fontWeight: '600' },
+  turnoLabel: { flex: 1, flexShrink: 1, marginRight: spacing.sm, color: colors.textSecondary, fontSize: fontSize.sm },
+  turnoValor: { flexShrink: 0, textAlign: 'right', color: colors.textPrimary, fontSize: fontSize.sm, fontWeight: '600' },
   logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',

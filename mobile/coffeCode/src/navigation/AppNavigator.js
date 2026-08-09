@@ -1,8 +1,10 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useAuth } from '../context/AuthContext';
 
 // Auth
+import SplashScreen from '../screens/auth/SplashScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 
 // Shared
@@ -33,13 +35,16 @@ import HistorialComprasScreen from '../screens/caja/HistorialComprasScreen';
 const Stack = createNativeStackNavigator();
 
 export default function AppNavigator() {
+  const { usuario } = useAuth();
+
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName="Login"
+        initialRouteName="Splash"
         screenOptions={{ headerShown: false, animation: 'none' }}
       >
         {/* ── Auth ── */}
+        <Stack.Screen name="Splash" component={SplashScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
 
         {/* ── Shared ── */}

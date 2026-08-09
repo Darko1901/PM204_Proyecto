@@ -1,21 +1,38 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
-import { mockProductos } from '../../data/mockData';
+import { getProductos } from '../../api/productos';
 import ScalePressable from '../../components/ScalePressable';
-
-const CATEGORIAS = ['Todas', 'Bebidas Calientes', 'Bebidas Frías', 'Panadería', 'Postres', 'Alimentos'];
 
 export default function MenuScreen({ route, navigation }) {
   const { cuenta, usuario } = route.params || {};
+  const [productos, setProductos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [busqueda, setBusqueda] = useState('');
   const [catActiva, setCatActiva] = useState('Todas');
   const [carrito, setCarrito] = useState([]);
 
-  const productosFiltrados = mockProductos.filter(p => {
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      setError('');
+      try {
+        setProductos(await getProductos());
+      } catch (e) {
+        setError(e?.message || 'No se pudo cargar el menú.');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const categorias = ['Todas', ...Array.from(new Set(productos.map(p => p.categoria).filter(Boolean)))];
+
+  const productosFiltrados = productos.filter(p => {
     const matchCat = catActiva === 'Todas' || p.categoria === catActiva;
     const matchBusq = p.nombre.toLowerCase().includes(busqueda.toLowerCase());
     return matchCat && matchBusq && p.disponible;
@@ -41,9 +58,9 @@ export default function MenuScreen({ route, navigation }) {
         {/* Parte Superior */}
         <View style={styles.productoHeader}>
           <View style={styles.catBadge}>
-            <Text style={styles.catBadgeText}>{item.categoria}</Text>
+            <Text style={styles.catBadgeText} numberOfLines={1}>{item.categoria}</Text>
           </View>
-          <Text style={styles.productoNombre} numberOfLines={1}>{item.nombre}</Text>
+          <Text style={styles.productoNombre} numberOfLines={2}>{item.nombre}</Text>
           <Text style={styles.productoDesc} numberOfLines={2}>{item.descripcion}</Text>
         </View>
 
@@ -112,7 +129,7 @@ export default function MenuScreen({ route, navigation }) {
 
       {/* Categorías */}
       <FlatList
-        data={CATEGORIAS}
+        data={categorias}
         horizontal
         showsHorizontalScrollIndicator={false}
         keyExtractor={c => c}
@@ -131,6 +148,16 @@ export default function MenuScreen({ route, navigation }) {
       />
 
       {/* Lista */}
+      {loading ? (
+        <View style={styles.empty}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : error ? (
+        <View style={styles.empty}>
+          <Ionicons name="cloud-offline-outline" size={40} color={colors.textMuted} />
+          <Text style={styles.emptyText}>{error}</Text>
+        </View>
+      ) : (
       <FlatList
         data={productosFiltrados}
         keyExtractor={item => String(item.id)}
@@ -146,6 +173,7 @@ export default function MenuScreen({ route, navigation }) {
           </View>
         }
       />
+      )}
 
       {/* Footer carrito */}
       {totalItems > 0 && (
@@ -157,7 +185,7 @@ export default function MenuScreen({ route, navigation }) {
             <Text style={styles.carritoBadgeText}>{totalItems}</Text>
           </View>
           <Text style={styles.carritoText}>Ver orden</Text>
-          <Text style={styles.carritoTotal}>${totalCarrito.toFixed(2)}</Text>
+          <Text style={styles.carritoTotal} numberOfLines={1}>${totalCarrito.toFixed(2)}</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -242,6 +270,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: 1,
     alignSelf: 'flex-start',
+    maxWidth: '100%',
     marginBottom: spacing.xs,
   },
   catBadgeText: { fontSize: fontSize.xs - 1, color: colors.primary, fontWeight: '600' },
@@ -297,6 +326,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cantidadNum: {
+    minWidth: 28,
+    flexShrink: 1,
     fontSize: 14,
     fontWeight: '700',
     color: colors.textPrimary,
@@ -326,6 +357,6 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   carritoBadgeText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.primary },
-  carritoText: { flex: 1, color: colors.bg, fontWeight: '700', fontSize: fontSize.md },
-  carritoTotal: { color: colors.bg, fontWeight: '700', fontSize: fontSize.md },
+  carritoText: { flex: 1, flexShrink: 1, color: colors.bg, fontWeight: '700', fontSize: fontSize.md },
+  carritoTotal: { flexShrink: 0, textAlign: 'right', color: colors.bg, fontWeight: '700', fontSize: fontSize.md },
 });
