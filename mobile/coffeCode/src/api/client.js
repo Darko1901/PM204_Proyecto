@@ -10,6 +10,14 @@ export function getAuthToken() {
   return authToken;
 }
 
+// Handler global de sesión caducada (401 con token): lo registra AuthContext
+// para limpiar la sesión y redirigir al login.
+let unauthorizedHandler = null;
+
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = handler;
+}
+
 export class ApiError extends Error {
   constructor(message, status, data) {
     super(message);
@@ -58,6 +66,12 @@ async function request(path, { method = 'GET', body, headers = {}, isForm = fals
     headers: finalHeaders,
     body: payload,
   });
+
+  // Token enviado pero rechazado: sesión caducada/inválida. Se notifica una vez
+  // (el login sin token sigue lanzando su error normal a la pantalla).
+  if (response.status === 401 && token) {
+    if (unauthorizedHandler) unauthorizedHandler();
+  }
 
   return parseResponse(response);
 }

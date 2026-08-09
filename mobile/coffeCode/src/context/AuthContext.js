@@ -1,5 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { loginRequest, getCurrentUser, restoreSession, logoutRequest } from '../api/auth';
+import { setUnauthorizedHandler } from '../api/client';
+import { navigationRef } from '../navigation/navigationRef';
 
 const AuthContext = createContext(null);
 
@@ -24,6 +26,19 @@ export function AuthProvider({ children }) {
         setLoading(false);
       }
     })();
+  }, []);
+
+  // 401 global: token caducado en mitad de la sesión → limpiar y volver al login.
+  useEffect(() => {
+    setUnauthorizedHandler(async () => {
+      await logoutRequest();
+      setToken(null);
+      setUsuario(null);
+      if (navigationRef.isReady()) {
+        navigationRef.reset({ index: 0, routes: [{ name: 'Login' }] });
+      }
+    });
+    return () => setUnauthorizedHandler(null);
   }, []);
 
   const signIn = useCallback(async (correo, password) => {

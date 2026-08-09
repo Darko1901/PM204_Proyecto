@@ -2,6 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../context/AuthContext';
+import { navigationRef } from './navigationRef';
 
 // Auth
 import SplashScreen from '../screens/auth/SplashScreen';
@@ -38,7 +39,7 @@ export default function AppNavigator() {
   const { usuario } = useAuth();
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator
         initialRouteName="Splash"
         screenOptions={{ headerShown: false, animation: 'none' }}
