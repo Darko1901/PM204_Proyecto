@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "CoffeeCode Cafetería",
-    "slug": "cafeteria-movil",
+    "name": "coffeCode",
+    "slug": "coffeCode",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#125377"
+      "backgroundColor": "#ffffff"
     },
     "ios": {
       "supportsTablet": true
@@ -18,7 +18,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#125377"
+        "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true
     },
