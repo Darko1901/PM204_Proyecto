@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  View, Text, TextInput, StyleSheet,
   StatusBar, KeyboardAvoidingView, Platform, ActivityIndicator,
   TouchableWithoutFeedback, Keyboard,
 } from 'react-native';
@@ -8,12 +8,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from '../../theme/colors';
 import ScalePressable from '../../components/ScalePressable';
 import { useAuth } from '../../context/AuthContext';
-
-const ACCESOS_DEMO = [
-  { rol: 'mesero', correo: 'mesero@cafeteria.com' },
-  { rol: 'cocina', correo: 'cocina@cafeteria.com' },
-  { rol: 'caja', correo: 'caja@cafeteria.com' },
-];
 
 export default function LoginScreen({ navigation }) {
   const { signIn } = useAuth();
@@ -100,24 +94,6 @@ export default function LoginScreen({ navigation }) {
             : <Text style={styles.btnText}>Entrar</Text>
           }
         </ScalePressable>
-
-        {/* Accesos rápidos de demo */}
-        <Text style={styles.demoTitle}>Acceso rápido (demo)</Text>
-        <View style={styles.demoRow}>
-          {ACCESOS_DEMO.map(({ rol, correo: correoDemo }) => (
-            <TouchableOpacity
-              key={rol}
-              style={styles.demoBtn}
-              onPress={() => {
-                setCorreo(correoDemo);
-                setPassword('cafe2026');
-              }}
-            >
-              <Text style={styles.demoBtnText}>{rol}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <Text style={styles.demoHint}>Pass: cafe2026</Text>
       </View>
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
@@ -205,38 +181,5 @@ const styles = StyleSheet.create({
     color: colors.bg,
     fontWeight: '700',
     fontSize: fontSize.md,
-  },
-  demoTitle: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
-    textAlign: 'center',
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  demoRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'center',
-  },
-  demoBtn: {
-    borderWidth: 1,
-    borderColor: colors.primary,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-  },
-  demoBtnText: {
-    color: colors.primary,
-    fontSize: fontSize.xs,
-    fontWeight: '600',
-    textTransform: 'capitalize',
-  },
-  demoHint: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
-    textAlign: 'center',
-    marginTop: spacing.xs,
   },
 });
