@@ -136,11 +136,45 @@ def crear_cuenta(
     db.add(nueva_cuenta)
     db.flush() # Obtener nueva_cuenta.id
     
-    total = 0.0
+    # 1. Validar disponibilidad y stock de todo el pedido
+    suministros_requeridos = {}
+    productos_obj = {}
     for d in body.detalles:
-        prod = db.get(Producto, d.producto_id)
+        prod = db.execute(
+            select(Producto)
+            .options(joinedload(Producto.recetas).joinedload(Receta.suministro))
+            .where(Producto.id == d.producto_id)
+        ).unique().scalar_one_or_none()
+        
         if not prod or not prod.disponible:
             raise HTTPException(status_code=400, detail=f"Producto id {d.producto_id} no disponible")
+            
+        productos_obj[d.producto_id] = prod
+        for receta in prod.recetas:
+            suministros_requeridos[receta.suministro_id] = suministros_requeridos.get(receta.suministro_id, 0) + (receta.cantidad * d.cantidad)
+            
+    # 2. Verificar si hay stock suficiente en los suministros
+    for sum_id, cantidad_req in suministros_requeridos.items():
+        suministro = db.get(Suministro, sum_id)
+        if suministro.stock_actual < cantidad_req:
+            # Encontrar un producto que usa este suministro para dar un mejor mensaje
+            prod_afectado = None
+            max_posible = 0
+            for d in body.detalles:
+                prod = productos_obj[d.producto_id]
+                for r in prod.recetas:
+                    if r.suministro_id == sum_id:
+                        prod_afectado = prod.nombre
+                        max_posible = int(suministro.stock_actual / r.cantidad) if r.cantidad > 0 else 0
+                        break
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Stock insuficiente de '{suministro.nombre}'. Tienes {suministro.stock_actual} {suministro.unidad}, pero se requieren {cantidad_req}. Con tu stock actual podrías preparar como máximo {max_posible} unidad(es) de '{prod_afectado}'."
+            )
+            
+    total = 0.0
+    for d in body.detalles:
+        prod = productos_obj[d.producto_id]
             
         detalle = DetalleCuenta(
             cuenta_id=nueva_cuenta.id,
@@ -170,11 +204,43 @@ def agregar_detalles_cuenta(
     if not cuenta or cuenta.estado != EstadoCuenta.abierta:
         raise HTTPException(status_code=400, detail="La cuenta no está abierta o no existe")
         
-    total_adicional = 0.0
+    # Validar disponibilidad y stock para los nuevos detalles
+    suministros_requeridos = {}
+    productos_obj = {}
     for d in detalles_nuevos:
-        prod = db.get(Producto, d.producto_id)
+        prod = db.execute(
+            select(Producto)
+            .options(joinedload(Producto.recetas).joinedload(Receta.suministro))
+            .where(Producto.id == d.producto_id)
+        ).unique().scalar_one_or_none()
+        
         if not prod or not prod.disponible:
             raise HTTPException(status_code=400, detail=f"Producto id {d.producto_id} no disponible")
+            
+        productos_obj[d.producto_id] = prod
+        for receta in prod.recetas:
+            suministros_requeridos[receta.suministro_id] = suministros_requeridos.get(receta.suministro_id, 0) + (receta.cantidad * d.cantidad)
+            
+    for sum_id, cantidad_req in suministros_requeridos.items():
+        suministro = db.get(Suministro, sum_id)
+        if suministro.stock_actual < cantidad_req:
+            prod_afectado = None
+            max_posible = 0
+            for d in detalles_nuevos:
+                prod = productos_obj[d.producto_id]
+                for r in prod.recetas:
+                    if r.suministro_id == sum_id:
+                        prod_afectado = prod.nombre
+                        max_posible = int(suministro.stock_actual / r.cantidad) if r.cantidad > 0 else 0
+                        break
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Stock insuficiente de '{suministro.nombre}'. Tienes {suministro.stock_actual} {suministro.unidad}, pero se requieren {cantidad_req}. Con tu stock actual podrías preparar como máximo {max_posible} unidad(es) de '{prod_afectado}'."
+            )
+            
+    total_adicional = 0.0
+    for d in detalles_nuevos:
+        prod = productos_obj[d.producto_id]
             
         detalle = DetalleCuenta(
             cuenta_id=cuenta.id,
@@ -242,6 +308,14 @@ def cerrar_cuenta(
     detalles = db.query(DetalleCuenta).filter_by(cuenta_id=cuenta.id).all()
     if not detalles:
         raise HTTPException(status_code=400, detail="No se puede cerrar una cuenta sin productos")
+        
+    # Verificar que todos los detalles estén entregados o cancelados
+    for d in detalles:
+        if d.estado not in (EstadoCocina.entregado, EstadoCocina.cancelado):
+            raise HTTPException(
+                status_code=400, 
+                detail="No se puede solicitar cobro porque hay productos pendientes o en preparación."
+            )
         
     cuenta.estado = EstadoCuenta.por_cobrar
     db.commit()
